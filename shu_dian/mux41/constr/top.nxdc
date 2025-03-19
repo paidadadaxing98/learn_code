@@ -1,0 +1,9 @@
+top=mux41
+
+s (SW0,SW1)
+a (SW2,SW3)
+b (SW4,SW5)
+c (SW6,SW7)
+d (SW8,SW9)
+
+y (LD0,LD1)

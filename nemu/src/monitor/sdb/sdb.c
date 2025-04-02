@@ -23,6 +23,8 @@ static int is_batch_mode = false;
 
 void init_regex();
 void init_wp_pool();
+void cpu_exec(uint64_t);
+void isa_reg_display();
 
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 static char* rl_gets() {
@@ -54,6 +56,74 @@ static int cmd_q(char *args) {
 
 static int cmd_help(char *args);
 
+// the following features were added later
+
+static int cmd_si(char *args) {
+  int n = 0;
+  if(args == NULL){
+    cpu_exec(1);
+  }
+  else{
+    sscanf(args,"%d ",&n);
+    cpu_exec(n);
+  }
+
+  return 0;
+}
+
+static int cmd_info(char *args){
+  if(args == NULL){
+    printf("you can choose r \n");
+  }
+  else{
+        if(strcmp(args,"r") == 0){
+      isa_reg_display();
+    }
+    else{
+      printf("unknown argument!");
+    }
+  }
+
+
+  return 0;
+}
+
+static int cmd_x(char *args){
+  int i;
+  int n,x;
+  if(args == NULL){
+    printf("please enter number!\n");
+    return 0;
+  }
+  else{
+      sscanf(args,"%d %x",&n,&x);
+
+    printf("address:%x\n",x);    //第一个地址
+    for(i=1;i<n;i++){
+      x = x + 4;
+      printf("address:%x\n",x);
+    }
+  }
+
+  return 0;
+}
+
+static int cmd_p(char *args){
+  bool success[1];
+  int val;
+  val = expr(args,success);
+  
+  if(*success){
+  printf("the result is %d\n",val);
+  }
+  else
+    {
+      printf("Parsing failure[cmd_p]\n");
+    }
+    return 0;
+}
+
+//finish adding
 static struct {
   const char *name;
   const char *description;
@@ -62,7 +132,10 @@ static struct {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
-
+  {"si","Single step", cmd_si},
+  {"info","print status",cmd_info},
+  {"x","scan memory",cmd_x},
+  {"p","find the value of expression",cmd_p},
   /* TODO: Add more commands */
 
 };

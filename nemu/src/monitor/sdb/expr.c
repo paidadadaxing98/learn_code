@@ -25,7 +25,8 @@
 #include <stdlib.h>
 
 enum {
-  TK_NOTYPE = 256, TK_EQ,TK_NUM,TK_16NUM,TK_ERROR 
+  TK_NOTYPE = 256, TK_EQ,TK_NUM,TK_16NUM,TK_ERROR,TK_MOD,TK_REG,
+  TK_INEQ,TK_AND,TK_OR,TK_DEREF,TK_NEG,
 
   /* TODO: Add more token types */
 
@@ -44,14 +45,18 @@ static struct rule {
   {"\\)", ')'},  
   {"\\+", '+'},       // plus
   {"-", '-'},
-  {"\\*", '*'},  
+  {"\\*", '*'},
+  {"\\%",'%'},  
   {"/ *0",TK_ERROR},
   {"/", '/'},  
   {" +", TK_NOTYPE},     // spaces        
-  {"==", TK_EQ},      // equal
+  {"==", TK_EQ},   
+  {"0[xX][0-9a-fA-F]+",TK_16NUM},     // equal
   {"[0-9]+",TK_NUM},   //number
-  {"^0[xX][0-9a-fA-F]+$",TK_16NUM},
-
+  {"^\\$[0-9a-zA-Z]+",TK_REG},
+  {"!=",TK_INEQ},
+  {"\\&\\&",TK_AND},
+  {"\\|\\|",TK_OR},
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -80,7 +85,7 @@ typedef struct token {
   char str[32];
 } Token;
 
-static Token tokens[32] __attribute__((used)) = {};
+static Token tokens[512] __attribute__((used)) = {};
 static int nr_token __attribute__((used))  = 0;
 
 static bool make_token(char *e) {
@@ -112,15 +117,34 @@ static bool make_token(char *e) {
           case '(':tokens[nr_token++].type = '(';break;
           case ')':tokens[nr_token++].type = ')';break;
           case '+':tokens[nr_token++].type = '+';break;
-          case '-':tokens[nr_token++].type = '-';break;
-          case '*':tokens[nr_token++].type = '*';break;
+          case '-':if(nr_token == 0 ||strchr("+-*/(",tokens[nr_token-1].type)){
+                  tokens[nr_token++].type = TK_NEG;
+          }else{
+                  tokens[nr_token++].type = '-';
+          }break;
+          case '*':if(nr_token == 0 ||strchr("+-*/(",tokens[nr_token-1].type))
+                  {
+                    tokens[nr_token++].type = TK_DEREF;
+                  }else{
+                    tokens[nr_token++].type = '*';
+                  }break;
           case '/':tokens[nr_token++].type = '/';break;
+          case '%':tokens[nr_token++].type = '%';break;
           case TK_NOTYPE:break;  
-          case TK_EQ:break; //'=='待完善
+          case TK_EQ:tokens[nr_token++].type = TK_EQ;break;
+          case TK_INEQ:tokens[nr_token++].type = TK_INEQ;break;
+          case TK_16NUM:tokens[nr_token].type = TK_16NUM;
+                s_cp = strndup(substr_start, substr_len);
+                strcpy(tokens[nr_token++].str,s_cp);break;
           case TK_NUM:
               tokens[nr_token].type = TK_NUM;
               s_cp = strndup(substr_start, substr_len);
               strcpy(tokens[nr_token++].str,s_cp);break;
+          case TK_REG:tokens[nr_token].type =TK_REG;
+              s_cp = strndup(substr_start, substr_len);
+              strcpy(tokens[nr_token++].str,s_cp);break; 
+          case TK_AND:tokens[nr_token++].type = TK_AND;break;
+          case TK_OR:tokens[nr_token++].type = TK_OR;break;
           case TK_ERROR:
               printf("/0 error!\n");return 0;
           default: 
@@ -216,20 +240,46 @@ static bool make_token(char *e) {
 // 寻找操作符,其实就是找优先级最低的位置
 int find_op(int p, int q) {
   int op = -1;
-  int priority = 3; 
+  int priority = 6; 
 
   for (int i = p; i <= q; i++) {
     if (tokens[i].type == '+' || tokens[i].type == '-') {
-      if (priority > 1) {
+      if (priority > 3) {
         op = i;
-        priority = 1;
+        priority = 3;
       }
-    } else if (tokens[i].type == '*' || tokens[i].type == '/') {
+    } 
+    else if(tokens[i].type == TK_DEREF || tokens[i].type == TK_NEG){
+      if (priority > 5) {
+        op = i;
+        priority = 5;
+    }
+  }
+    else if(tokens[i].type == '*' || tokens[i].type == '/' || tokens[i].type == '%' ) {
+      if (priority > 4) {
+        op = i;
+        priority = 4;
+      }
+    }
+    else if(tokens[i].type == TK_EQ || tokens[i].type == TK_INEQ){
       if (priority > 2) {
         op = i;
         priority = 2;
       }
     }
+      else if(tokens[i].type == TK_AND){
+        if (priority > 1) {
+          op = i;
+          priority = 1;
+        }
+      }  
+        else if(tokens[i].type == TK_OR){
+          if (priority > 0) {
+            op = i;
+            priority = 0;
+          }
+    }
+
     //跳过'()'以及里面的内容
       else if(tokens[i].type == '('){
         while(tokens[i].type != ')')
@@ -238,22 +288,31 @@ int find_op(int p, int q) {
   }
 
   return op;
-}
+  }
 
+word_t vaddr_read(vaddr_t, int);
 
 int eval(int p,int  q) {
   int32_t val,val1,val2;
   int8_t op;
 
     if (p > q) {
-      printf("Bad expression \n");
+      //printf("Bad expression \n");
       return 0; 
     }
     else if (p == q) {
-      sscanf(tokens[p].str,"%d",&val);
-      return val;
+      if(tokens[p].type == TK_NUM){
+        sscanf(tokens[p].str,"%d",&val);return val;
+      }
+      if(tokens[p].type == TK_16NUM){
+        sscanf(tokens[p].str,"%x",&val);return val;
+      }
+      if(tokens[p].type == TK_REG){
+        bool success[1];
+        return isa_reg_str2val(tokens[p].str + 1, success);//去除$
+      }
     }
-    else if (check_parentheses(p, q) == 1) {
+    else if(check_parentheses(p, q) == 1){
       return eval(p + 1, q - 1);
     }
     else {
@@ -262,13 +321,21 @@ int eval(int p,int  q) {
       val2 = eval(op + 1, q);
 
       switch (tokens[op].type) {
+        case TK_NEG: return -val2;
+        case TK_DEREF:return vaddr_read(val2, 4);
         case '+': return val1 + val2;
         case '-': return val1 - val2;
         case '*': return val1 * val2;
         case '/': return val1 / val2;
+        case '%': return val1 % val2;
+        case TK_EQ:return val1 == val2;
+        case TK_INEQ:return val1 != val2;
+        case TK_AND:return val1 && val2;
+        case TK_OR:return val1 || val2;
         default: assert(0);
       }
     }
+  return 0;
 }
 
 int expr(char *e, bool *success) {
@@ -283,6 +350,7 @@ int expr(char *e, bool *success) {
 
   /* TODO: Insert codes to evaluate the expression. */
 else {
+    printf("tokens mismatch\n");
     return 0;
 }
 

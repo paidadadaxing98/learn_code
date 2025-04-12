@@ -15,6 +15,7 @@
 
 #include <isa.h>
 #include "local-include/reg.h"
+
 #define NUM_REGS (sizeof(regs) / sizeof(regs[0]))
 
 const char *regs[] = {
@@ -25,13 +26,30 @@ const char *regs[] = {
 };
 
 void isa_reg_display() {
+  bool success = true;
+  int32_t val;
+  printf("reg    reg_val\n");
   for (int i = 0; i < NUM_REGS; i++) {
-    printf("%s  ", regs[i]);
+    val = isa_reg_str2val(regs[i],&success);
+    printf("%-7s0x%08x\n",regs[i],val);
   }
   printf("\n");
 }
 
 
 word_t isa_reg_str2val(const char *s, bool *success) {
+  int i =0;
+  for(i=0;i<NUM_REGS;i++){
+     if(strcmp(s,regs[i]) == 0){
+      *success = 1;
+      return cpu.gpr[i];
+     }
+  }
+  if(i == NUM_REGS){
+    *success = 0;
+    printf("can't find %s reg\n",s);
+    return 0;
+  }
+
   return 0;
 }

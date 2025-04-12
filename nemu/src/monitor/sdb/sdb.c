@@ -21,10 +21,18 @@
 
 static int is_batch_mode = false;
 
+int wp_main();
+
+bool wp_print();
+word_t vaddr_read(vaddr_t, int);
 void init_regex();
 void init_wp_pool();
 void cpu_exec(uint64_t);
 void isa_reg_display();
+void file_test(void);
+WP* new_wp();
+void free_wp();
+
 
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 static char* rl_gets() {
@@ -71,19 +79,22 @@ static int cmd_si(char *args) {
   return 0;
 }
 
+
 static int cmd_info(char *args){
   if(args == NULL){
-    printf("you can choose r \n");
+    printf("you can choose r or w \n");
   }
   else{
-        if(strcmp(args,"r") == 0){
-      isa_reg_display();
-    }
-    else{
-      printf("unknown argument!");
+      if(strcmp(args,"r") == 0){
+        isa_reg_display();    
+      }
+      else if(strcmp(args,"w") == 0){
+        wp_print();
+      }
+      else{
+        printf("unknown argument!\n");
     }
   }
-
 
   return 0;
 }
@@ -91,22 +102,27 @@ static int cmd_info(char *args){
 static int cmd_x(char *args){
   int i;
   int n,x;
+  int32_t val;
   if(args == NULL){
     printf("please enter number!\n");
     return 0;
   }
   else{
       sscanf(args,"%d %x",&n,&x);
-
-    printf("address:%x\n",x);    //第一个地址
-    for(i=1;i<n;i++){
+      val = vaddr_read(x,4);
+      printf("address:0x%-8x : 0x%08x\n",x,val);    //第一个地址
+     for(i=1;i<n;i++){
       x = x + 4;
-      printf("address:%x\n",x);
+      val = vaddr_read(x,4);
+      printf("address:0x%-8x : 0x%08x\n",x,val);
+     }
+    
+      return 0;
     }
+
   }
 
-  return 0;
-}
+
 
 static int cmd_p(char *args){
   bool success[1];
@@ -123,6 +139,104 @@ static int cmd_p(char *args){
     return 0;
 }
 
+static int cmd_test(char *args){
+  if(args == NULL){
+    printf("please enter a loop number\n");
+    return 0;
+  }
+  else {
+    int i = 0;
+    int status;   
+    char command[256];  
+    sscanf(args,"%d",&i);
+    sprintf(command, "/home/zy/ysyx-workbench/nemu/tools/gen-expr/gen-expr %d > ./test_expression", i);
+    status = system(command);
+    if(status < 0){
+      return 0;
+    }
+    file_test();
+  }
+  return 1;
+}
+
+void file_test(){
+  FILE *f = fopen("/home/zy/ysyx-workbench/nemu/test_expression","r");
+  if(f == NULL){
+    printf("memory fail!\n");
+    exit(1);
+  }
+  char express[1024];
+  int32_t expect_result = 0;
+  bool success[1];
+  while(fscanf(f,"%d %s",&expect_result,express) != EOF){
+    printf("%d %s\n",expect_result,express);
+    int result = 0;
+    result = expr(express,success);
+    if(result == expect_result){
+      printf("success!\n");
+    }
+    else{
+      printf("error!\nexpect result is %d\nbut result is %d\n",expect_result,result);
+    }
+  }
+
+  fclose(f);
+}
+
+
+int cmd_w(char *args){
+  WP* reg;
+  bool success = true;
+  if(args == NULL){
+    printf("enter an expression\n");
+    return 0;
+  }
+  else{
+    reg = new_wp();
+    assert(reg);
+    sprintf(reg->expr,"%s",args);
+    reg->l_result =expr(reg->expr,&success);
+  }
+  return 0;
+}
+
+int cmd_d(char *args){
+  int n;
+  if(args == NULL){
+    printf("enter a NO.\n");
+  }
+  else{
+    sscanf(args,"%d",&n);
+    free_wp(n);
+  }
+    
+  return 0;
+}
+
+int cmd_b(char *args){
+  int addr;
+  char b_cmd[64];
+  int status;
+  if(args == NULL){
+    printf("enter address\n");
+  }
+  else{
+    sscanf(args,"%x",&addr);
+    sprintf(b_cmd,"w $t0 == %x",addr);
+    printf("%s\n",b_cmd);
+    status = system(b_cmd);
+    if(status < 0){
+      printf("unkonwn address\n");
+    }
+
+    cpu_exec(1);
+  }
+  return 0;
+}
+
+
+
+
 //finish adding
 static struct {
   const char *name;
@@ -136,6 +250,10 @@ static struct {
   {"info","print status",cmd_info},
   {"x","scan memory",cmd_x},
   {"p","find the value of expression",cmd_p},
+  {"test","test the expression",cmd_test},
+  {"w","add a watchpoint",cmd_w},
+  {"d","delete a watchpoint",cmd_d},
+  {"b","set a breakpoint",cmd_b},
   /* TODO: Add more commands */
 
 };
@@ -172,7 +290,7 @@ void sdb_set_batch_mode() {
 void sdb_mainloop() {
   if (is_batch_mode) {
     cmd_c(NULL);
-    return;
+    return ;
   }
 
   for (char *str; (str = rl_gets()) != NULL; ) {

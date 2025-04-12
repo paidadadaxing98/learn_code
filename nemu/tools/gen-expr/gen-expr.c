@@ -33,7 +33,7 @@ static char *code_format =
 
 //generate a random number
 static char* buf_p = buf;
-
+static int tk_i = 0;
 static void gen(char str){
   *buf_p = str;
   buf_p++;
@@ -44,6 +44,7 @@ static void gen_num(){
   *buf_p = num + '0';
   buf_p++;
 }
+
 static void gen_op(){
   switch(rand()%3){
     case 0:*buf_p = '-';buf_p++;break;
@@ -54,17 +55,21 @@ static void gen_op(){
 }
 
 
-
+ 
 static void gen_rand_expr() {
-  switch (rand()%4)
+
+  switch (rand()%3)
   {
   case 0:gen_num();break;
-  case 1:gen('(');gen_rand_expr();gen(')');break;
-  case 2:gen(' ');
-  default:gen_rand_expr();gen_op();gen_rand_expr();
-    break;
+  case 1:if(tk_i<3){
+    gen('(');gen_rand_expr();gen(')');
   }
-
+  tk_i++;break;
+  default:if(tk_i<3){
+    gen_rand_expr();gen_op();gen_rand_expr();
+  }
+  tk_i++;break;
+  }
 }
 
 //finish
@@ -77,11 +82,13 @@ int main(int argc, char *argv[]) {
     sscanf(argv[1], "%d", &loop);
   }
   int i;
+
   for (i = 0; i < loop; i ++) {
     buf_p = buf;    //reset
-
     gen_rand_expr();
     *buf_p = '\0';buf_p++;
+    tk_i = 0;
+
 
     sprintf(code_buf, code_format, buf);
 

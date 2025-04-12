@@ -18,6 +18,22 @@
 
 #include <common.h>
 
+#define NR_WP 33//第一个不用
 word_t expr(char *e, bool *success);
+
+typedef struct watchpoint {
+    int NO;
+    int status;
+    struct watchpoint *next;
+    char expr[128];
+    int32_t l_result;
+    /* TODO: Add more members if necessary */
+  
+  } WP;
+
+extern WP* head;
+extern WP wp_pool[NR_WP];
+
+
 
 #endif

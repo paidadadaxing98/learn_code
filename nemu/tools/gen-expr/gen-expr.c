@@ -26,50 +26,86 @@ static char code_buf[65536 + 128] = {}; // a little larger than `buf`
 static char *code_format =
 "#include <stdio.h>\n"
 "int main() { "
-"  unsigned result = %s; "
-"  printf(\"%%u\", result); "
+"  int result = %s; "
+"  printf(\"%%d\", result); "
 "  return 0; "
 "}";
 
 //generate a random number
 static char* buf_p = buf;
-static int tk_i = 0;
+static char* buf_out = buf;
+static int not_0 = 0;
+static int expr_len = 0;
+static int last_expr = 0;
+static int last_num = 0;
 static void gen(char str){
   *buf_p = str;
   buf_p++;
+  expr_len++;
 }
 static void gen_num(){
   int num;
   num = rand() % 10; //within 10
   *buf_p = num + '0';
+  last_num = num;
   buf_p++;
-}
+  expr_len++;
+}//0-9
+
+static void gen_num_bigger(int n){
+  int num;
+  num = rand() % (10 - n); 
+  *buf_p = num + '0' + n;
+  buf_p++;
+  expr_len++;
+}//n-9
+
+static void gen_num_small(int n){
+  int num;
+  num = rand() % n; 
+  *buf_p = num + '0' + 1;
+  buf_p++;
+  expr_len++;
+}//1-n
 
 static void gen_op(){
-  switch(rand()%3){
-    case 0:*buf_p = '-';buf_p++;break;
-    case 1:*buf_p = '*';buf_p++;break;
-    case 2:*buf_p = '/';buf_p++;break;
-    default:*buf_p = '+';buf_p++;break;
+  not_0 = 0;
+  switch(rand()%8){
+    case 0:gen('-');break;
+    case 1:gen('-');break;
+    case 2:gen('/');not_0=1;break;
+    case 3:gen('*');break;
+    case 4:gen('*');break;
+    case 5:gen('+');break;
+    default:gen('+');break;
   }
 }
 
 
  
-static void gen_rand_expr() {
+static void gen_rand_expr(int deep) {
 
+  if(deep > 4){
+    if(not_0 == 0){
+      gen_num();
+    }
+    else{
+      gen_num_bigger(1);
+    }
+  }
+  else{
   switch (rand()%3)
-  {
-  case 0:gen_num();break;
-  case 1:if(tk_i<3){
-    gen('(');gen_rand_expr();gen(')');
+    {
+    case 0:if(not_0 == 0){gen_num();}
+            else{gen_num_bigger(1);}
+            break;
+    case 1:
+      gen('(');gen_rand_expr(deep+1);gen(')');break;
+    default:
+      gen_rand_expr(deep+1);gen_op();gen_rand_expr(deep+1);break;
+    }
   }
-  tk_i++;break;
-  default:if(tk_i<3){
-    gen_rand_expr();gen_op();gen_rand_expr();
-  }
-  tk_i++;break;
-  }
+  
 }
 
 //finish
@@ -84,13 +120,13 @@ int main(int argc, char *argv[]) {
   int i;
 
   for (i = 0; i < loop; i ++) {
-    buf_p = buf;    //reset
-    gen_rand_expr();
-    *buf_p = '\0';buf_p++;
-    tk_i = 0;
+    expr_len = 0;
+    buf_out = buf_out + last_expr;    //reset
+    gen_rand_expr(0);
+    gen('\0');
+    last_expr = expr_len;
 
-
-    sprintf(code_buf, code_format, buf);
+    sprintf(code_buf, code_format, buf_out);
 
     FILE *fp = fopen("/tmp/.code.c", "w");
     assert(fp != NULL);
@@ -107,8 +143,7 @@ int main(int argc, char *argv[]) {
     ret = fscanf(fp, "%d", &result);
     pclose(fp);
 
-    printf("%u %s\n", result, buf);
+    printf("%d %s\n", result, buf_out);
   }
   return 0;
 }
-

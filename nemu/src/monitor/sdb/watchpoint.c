@@ -110,18 +110,21 @@ static char* rl_gets() {
   return line_read;
 }
 
+
 bool wp_change(){
+  bool change = false;
   WP* head_p = head->next;
   bool success = false;
   while(head_p != NULL){
   if(expr(head_p->expr,&success) != head_p->l_result){
     head_p->l_result = expr(head_p->expr,&success);
-    printf("this watchpoint changed!\n");
-    return true;
+    printf("NO.%d watchpoint changed!\n",head_p->NO);
+    head_p = head_p->next;
+    change = true;    
+    continue;
   }
-  head_p = head_p->next;
 }
-  return false;
+  return change;
 }
 
 void wp_print(){  

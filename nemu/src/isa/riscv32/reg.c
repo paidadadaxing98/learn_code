@@ -33,19 +33,23 @@ void isa_reg_display() {
     val = isa_reg_str2val(regs[i],&success);
     printf("%-7s0x%08x\n",regs[i],val);
   }
+  printf("pc:0x%x\n",cpu.pc);
   printf("\n");
 }
 
 
 word_t isa_reg_str2val(const char *s, bool *success) {
   int i =0;
+  if(strcmp(s,"pc") == 0){
+    return cpu.pc;
+  }
   for(i=0;i<NUM_REGS;i++){
      if(strcmp(s,regs[i]) == 0){
       *success = 1;
       return cpu.gpr[i];
      }
   }
-  if(i == NUM_REGS){
+  if(i == NUM_REGS && strcmp(s,"pc") != 0){
     *success = 0;
     printf("can't find %s reg\n",s);
     return 0;

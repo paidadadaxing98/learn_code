@@ -166,18 +166,27 @@ void file_test(){
     exit(1);
   }
   char express[1024];
-  int32_t expect_result = 0;
-  bool success[1];
+  int expect_result = 0;
+  bool success = false;
+  int error_num = 0;
   while(fscanf(f,"%d %s",&expect_result,express) != EOF){
-    printf("%d %s\n",expect_result,express);
-    int result = 0;
-    result = expr(express,success);
+    unsigned result = 0;
+    result = expr(express,&success);
     if(result == expect_result){
-      printf("success!\n");
+      continue;
     }
     else{
+      error_num++;
+      printf("%d %s\n",expect_result,express);
       printf("error!\nexpect result is %d\nbut result is %d\n",expect_result,result);
     }
+  }
+
+  if(error_num == 0){
+    printf("all expression can pass!\n");
+  }
+  else{
+    printf("error number:%d\n",error_num);
   }
 
   fclose(f);
@@ -185,29 +194,39 @@ void file_test(){
 
 
 int cmd_w(char *args){
-  WP* reg;
-  bool success = true;
+
   if(args == NULL){
     printf("enter an expression\n");
     return 0;
   }
   else{
+    #ifdef CONFIG_WATCH_POINT
+    WP* reg;
+    bool success = true;
     reg = new_wp();
     assert(reg);
     sprintf(reg->expr,"%s",args);
     reg->l_result =expr(reg->expr,&success);
+    #else
+    printf("can't enable watch_point\n");
+    #endif
   }
   return 0;
 }
 
 int cmd_d(char *args){
-  int n;
+
   if(args == NULL){
     printf("enter a NO.\n");
   }
   else{
+    #ifdef CONFIG_WATCH_POINT
+    int n;
     sscanf(args,"%d",&n);
     free_wp(n);
+    #else
+      printf("can't enable watch_point\n");
+    #endif
   }
     
   return 0;

@@ -167,73 +167,46 @@ static bool make_token(char *e) {
 //计算表达式
 
 //括号匹配，是否需要去最外层括号
-#define STACK_MAX 32
-  typedef struct {
-    Token base[STACK_MAX];
-    Token* top;
-  }token_stack;
-  void stack_init(token_stack *s){
-    s->top = s->base;
-  }
-  void push(token_stack *s,Token t){
-    if(s->top - s->base < STACK_MAX*sizeof(Token) ){
-      *(s->top) = t;
-      (s->top)++;   
-    }
-    else
-      printf("stack full\n");
-  }
-  void pop(token_stack *s,Token *t){
-    if(s->top > s->base){
-      (s->top)--;
-      *t = *(s->top);
-    }
-    else
-      printf("stack empty!\n");
-  }
 
+    bool is_paired(int p, int q) {
+      int banlance = 0;
+      for (int i = p; i <= q; i++) {
+        if (tokens[i].type == '(') {
+          banlance++;
+        }
+        else if (tokens[i].type == ')') {
+          banlance--;
+          if (banlance < 0) {
+            return false;
+          }
+        }
+      }
+      //printf("balance:%d,position:%d - %d\n",banlance,p+1,q+1);
+      return banlance == 0;
+    }
 
   int check_parentheses(int p, int q) {
-    Token popped;
-    token_stack s;
-    stack_init(&s);
-
-
     if (tokens[p].type != '(' || tokens[q].type != ')') {
         return 0;
     }
-
-    for (int i = p; i <= q; i++) {
-        if (tokens[i].type == '(') {
-            push(&s, tokens[i]);
-        } 
-        else if (tokens[i].type == ')') {
-            // 遇到右括号时栈为空说明不匹配
-            if (s.top == s.base) {
-                return 0;
-            }
-            pop(&s, &popped); 
-        }
-    }
-
-    if (s.top != s.base) {
-      printf("bracket mismatched\n");
-      exit(0);
-    }
-    
-    // 检查（）+（）形式
     int balance = 0;
-    for (int i = p + 1; i < q; i++) {
+    // 检查（）+（）形式
+    if(is_paired(p,q)){
+      for (int i = p + 1; i < q; i++) {
         if (tokens[i].type == '(') balance++;
         else if (tokens[i].type == ')') balance--;
-        if (balance < 0) break;
-        }
-
-
-    return (balance == 0);
+        if (balance < 0) return 0;
+      }
+      //printf("qu kuo hao:%d\n",balance==0);
+      return balance == 0;
+    }
+    else {
+      printf("Failed to match the 'parentheses\n");
+      assert(0);
+    }
+    return 0;
 }
     
-
 
 
 
@@ -241,52 +214,54 @@ static bool make_token(char *e) {
 int find_op(int p, int q) {
   int op = -1;
   int priority = 6; 
-
+  int balance = 0;
   for (int i = p; i <= q; i++) {
-    if (tokens[i].type == '+' || tokens[i].type == '-') {
-      if (priority > 3) {
+    if(tokens[i].type == '('){
+      balance++;
+    }
+    else if(tokens[i].type == ')'){
+      balance--;
+    }
+    else if ((tokens[i].type == '+' || tokens[i].type == '-') && balance==0) {
+      if (priority >= 3) {
         op = i;
         priority = 3;
       }
     } 
-    else if(tokens[i].type == TK_DEREF || tokens[i].type == TK_NEG){
-      if (priority > 5) {
+    else if((tokens[i].type == TK_DEREF || tokens[i].type == TK_NEG) && balance==0){
+      if (priority >= 5) {
         op = i;
         priority = 5;
     }
   }
-    else if(tokens[i].type == '*' || tokens[i].type == '/' || tokens[i].type == '%' ) {
-      if (priority > 4) {
+    else if((tokens[i].type == '*' || tokens[i].type == '/' || tokens[i].type == '%') && balance==0 ) {
+      if (priority >= 4) {
         op = i;
         priority = 4;
       }
     }
-    else if(tokens[i].type == TK_EQ || tokens[i].type == TK_INEQ){
-      if (priority > 2) {
+    else if((tokens[i].type == TK_EQ || tokens[i].type == TK_INEQ) && balance==0){
+      if (priority >= 2) {
         op = i;
         priority = 2;
       }
     }
-      else if(tokens[i].type == TK_AND){
-        if (priority > 1) {
+      else if((tokens[i].type == TK_AND) && balance==0){
+        if (priority >= 1) {
           op = i;
           priority = 1;
         }
       }  
-        else if(tokens[i].type == TK_OR){
-          if (priority > 0) {
+        else if((tokens[i].type == TK_OR) && balance==0){
+          if (priority >= 0) {
             op = i;
             priority = 0;
           }
     }
 
-    //跳过'()'以及里面的内容
-      else if(tokens[i].type == '('){
-        while(tokens[i].type != ')')
-          i++;
-      }
+  
   }
-
+  //printf("op position:%d\n",op);
   return op;
   }
 
@@ -297,7 +272,7 @@ int eval(int p,int  q) {
   int8_t op;
 
     if (p > q) {
-      //printf("Bad expression \n");
+      printf("Bad expression \n");
       return 0; 
     }
     else if (p == q) {
@@ -316,6 +291,7 @@ int eval(int p,int  q) {
       return eval(p + 1, q - 1);
     }
     else {
+      //printf("find_op position:%d - %d",p,q);
       op = find_op(p,q);
       val1 = eval(p, op - 1);
       val2 = eval(op + 1, q);
@@ -326,13 +302,20 @@ int eval(int p,int  q) {
         case '+': return val1 + val2;
         case '-': return val1 - val2;
         case '*': return val1 * val2;
-        case '/': return val1 / val2;
+        case '/': if(val2 == 0){
+                  printf("position %d: /0 error\n",op+1);
+                  return 0;
+                  }
+                  else{
+                    return val1 / val2;
+                  }
         case '%': return val1 % val2;
         case TK_EQ:return val1 == val2;
         case TK_INEQ:return val1 != val2;
         case TK_AND:return val1 && val2;
         case TK_OR:return val1 || val2;
-        default: assert(0);
+        default:printf("type:%c %d\n",tokens[op].type,tokens[op].type);
+              assert(0);
       }
     }
   return 0;

@@ -26,7 +26,7 @@ void wp_mainloop(void);
 
 WP wp_pool[NR_WP] = {};
 WP *head = NULL, *free_ = NULL;
-//记得最后要free(head)
+
 void init_wp_pool() {
   int i;
   for (i = 0; i < NR_WP; i ++) {
@@ -50,7 +50,7 @@ WP *new_wp(){
   else{
       while(pool_p->next->next != NULL){
       pool_p = pool_p->next;
-  }//take the last WP
+  }
     while(head_p->next != NULL){
       head_p = head_p->next;
     }
@@ -111,18 +111,18 @@ static char* rl_gets() {
 }
 
 
+
 bool wp_change(){
-  bool change = false;
   WP* head_p = head->next;
   bool success = false;
+  bool change = false;
   while(head_p != NULL){
   if(expr(head_p->expr,&success) != head_p->l_result){
     head_p->l_result = expr(head_p->expr,&success);
     printf("NO.%d watchpoint changed!\n",head_p->NO);
-    head_p = head_p->next;
-    change = true;    
-    continue;
+    change = true;
   }
+      head_p = head_p->next;
 }
   return change;
 }
@@ -220,5 +220,3 @@ void wp_mainloop(){
   }
 
 }
-
-

@@ -272,7 +272,7 @@ int eval(int p,int  q) {
   int8_t op;
 
     if (p > q) {
-      printf("Bad expression \n");
+      //printf("Bad expression \n");
       return 0; 
     }
     else if (p == q) {

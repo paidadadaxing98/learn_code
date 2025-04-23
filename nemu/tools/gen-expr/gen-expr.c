@@ -81,15 +81,22 @@ static void gen_op(){
   }
 }
 
+void gen_space(){
+  if(rand() % 5 >= 3 ){
+    gen(' ');
+  }
+}
 
  
 static void gen_rand_expr(int deep) {
 
   if(deep > 4){
     if(not_0 == 0){
+      gen_space();
       gen_num();
     }
     else{
+      gen_space();
       gen_num_bigger(1);
     }
   }
@@ -102,7 +109,7 @@ static void gen_rand_expr(int deep) {
     case 1:
       gen('(');gen_rand_expr(deep+1);gen(')');break;
     default:
-      gen_rand_expr(deep+1);gen_op();gen_rand_expr(deep+1);break;
+      gen_rand_expr(deep+1);gen_space();gen_op();gen_space();gen_rand_expr(deep+1);break;
     }
   }
   

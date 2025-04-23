@@ -15,4 +15,10 @@
 
 NAME = gen-expr
 SRCS = gen-expr.c
-include $(NEMU_HOME)/scripts/build.mk
+
+run:
+	gcc -g $(SRCS) -o $(NAME)
+	./$(NAME) 50 > test_express
+clean:
+	rm $(NAME)
+.PHONY:run clean

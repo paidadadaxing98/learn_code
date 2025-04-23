@@ -47,6 +47,8 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
   if(wp_change()){
     nemu_state.state = NEMU_STOP;
   }
+  #else
+    printf("disable WATCH POINT\n");
   #endif
   
 }

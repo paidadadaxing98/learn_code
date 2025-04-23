@@ -102,19 +102,26 @@ static int cmd_info(char *args){
 static int cmd_x(char *args){
   int i;
   int n,x;
+  int addr;
+  char expression[512] = {0};bool success = false;
   int32_t val;
   if(args == NULL){
     printf("please enter number!\n");
     return 0;
   }
   else{
-      sscanf(args,"%d %x",&n,&x);
+      sscanf(args,"%d %s",&n,expression);
+      if(expression[0] == '\0'){
+        x = 0x80000000;
+      }
+      else{
+        x = expr(expression,&success);
+      }
+
+     for(i=0;i<n;i++){
+      addr = x + 4*i;
       val = vaddr_read(x,4);
-      printf("address:0x%-8x : 0x%08x\n",x,val);    //第一个地址
-     for(i=1;i<n;i++){
-      x = x + 4;
-      val = vaddr_read(x,4);
-      printf("address:0x%-8x : 0x%08x\n",x,val);
+      printf("address:0x%-8x : 0x%08x\n",addr,val);
      }
     
       return 0;
@@ -169,7 +176,7 @@ void file_test(){
   int expect_result = 0;
   bool success = false;
   int error_num = 0;
-  while(fscanf(f,"%d %s",&expect_result,express) != EOF){
+  while(fscanf(f,"%d %[^\n]",&expect_result,express) != EOF){
     unsigned result = 0;
     result = expr(express,&success);
     if(result == expect_result){
@@ -200,16 +207,12 @@ int cmd_w(char *args){
     return 0;
   }
   else{
-    #ifdef CONFIG_WATCH_POINT
     WP* reg;
     bool success = true;
     reg = new_wp();
     assert(reg);
     sprintf(reg->expr,"%s",args);
     reg->l_result =expr(reg->expr,&success);
-    #else
-    printf("can't enable watch_point\n");
-    #endif
   }
   return 0;
 }
@@ -220,13 +223,9 @@ int cmd_d(char *args){
     printf("enter a NO.\n");
   }
   else{
-    #ifdef CONFIG_WATCH_POINT
     int n;
     sscanf(args,"%d",&n);
     free_wp(n);
-    #else
-      printf("can't enable watch_point\n");
-    #endif
   }
     
   return 0;
@@ -335,7 +334,7 @@ void sdb_mainloop() {
     int i;
     for (i = 0; i < NR_CMD; i ++) {
       if (strcmp(cmd, cmd_table[i].name) == 0) {
-        if (cmd_table[i].handler(args) < 0) { exit(0); }    //该函数没有返回值，不能用return;
+        if (cmd_table[i].handler(args) < 0) { exit(0); }    
         break;
       }
     }

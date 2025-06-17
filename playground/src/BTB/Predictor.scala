@@ -38,9 +38,11 @@ class Predictor extends Module with BPUtils with PredParams{
         val update = Input(new PredictorEntry)
     })
 
-    val bhtBank =RegInit(VecInit(Seq.fill(nBHT)(0.U.asTypeOf(new BHTEntry()))))
+    val bhtBank =RegInit(VecInit(Seq.fill(nBHT)
+                                        (0.U.asTypeOf(new BHTEntry()))  ))
 
-    val phtBank =RegInit(VecInit(Seq.fill(nPHT)(0.U.asTypeOf(new PHTEntry()))))
+    val phtBank =RegInit(VecInit(Seq.fill(nPHT)
+                                        (0.U.asTypeOf(new PHTEntry()))))
 
     val bht_idx_0, bht_idx_1, bht_idx_u = Wire(UInt(BHTLen.W))
     val pht_idx_0, pht_idx_1, pht_idx_u = Wire(UInt(PHTLen.W))
@@ -66,7 +68,7 @@ class Predictor extends Module with BPUtils with PredParams{
         when(bhtBank(bht_r).valid){
             bhtBank(bht_r).bhr := Cat(bhtBank(bht_r).bhr(BHRLen - 2, 0), io.update.brTaken)
         }.otherwise{
-            bhtBank(bht_r).bhr := io.update.brTaken
+            bhtBank(bht_r).bhr := io.update.brTaken //重置历史
         }
 
         when(phtBank(pht_idx_u).valid){

@@ -21,16 +21,16 @@ trait BPUtils {
         Mux(oldSatTaken && taken, ((1 << len)-1).U,
         Mux(oldSatNotTaken && !taken, 0.U,
             Mux(taken, old + 1.U, old - 1.U)))
-    }
+    }//len位的计数器，更新旧值
 
     def get_seg(pc: UInt, size: Int, star: Int): UInt = {
         pc(star + size - 1, star)
-    }
+    }//pc[star:star + size -1]
 
     //折叠hist为l长度
     def compute_folded_idx(hist: UInt, histLen: Int, l: Int) = {
         if (histLen > 0) {
-            val nChunks = (histLen + l - 1) / l
+            val nChunks = (histLen + l - 1) / l //向上取整，分成n个块
             val hist_chunks = (0 until nChunks) map {i =>
                 if( (i+1)*l > histLen){
                     hist(histLen-1, i*l)
@@ -41,7 +41,7 @@ trait BPUtils {
             ParallelXOR(hist_chunks)
         }
         else 0.U
-    }
+    }//Xor为l位，将histlen划分为l位的一块一块的
 }
 
 class BTBEntry extends Bundle {
@@ -54,7 +54,7 @@ class BTBEntry extends Bundle {
 class BTBEntryWithTag extends Bundle with BPUtils{
     val valid = Bool()
     val tag = UInt(tagSize.W)
-    val entry = new BTBEntry()
+    val entry = new BTBEntry()//type target
 }
 
 class PredictorInput extends Bundle {
@@ -91,7 +91,8 @@ class BTB extends Module with BPUtils {
     // val ctrs = Vec(nSets,
     //     RegInit(VecInit(Seq.fill(nSets)(0.U.asTypeOf(UInt(2.W)))))
     // )
-    val btbBank = RegInit(VecInit(Seq.fill(nSets)(VecInit(Seq.fill(nWays)(0.U.asTypeOf(new BTBEntryWithTag()))))))
+    val btbBank = RegInit(VecInit(Seq.fill(nSets)
+                                (VecInit(Seq.fill(nWays)(0.U.asTypeOf(new BTBEntryWithTag()))))))
 
     // val btbBank = Seq.fill(nSets)(
     //     RegInit(VecInit.fill(nWays)(0.U.asTypeOf(new BTBEntryWithTag())))

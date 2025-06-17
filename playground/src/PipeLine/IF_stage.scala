@@ -7,7 +7,7 @@ import config.GenCtrl
 class IFU extends Module {
   val fs=IO(new Bundle {
     val in=Flipped(Decoupled(new pf_to_if_bus_bundle()))
-    val to_id=new if_to_id_bus_bundle()
+    val to_id=new if_to_id_bus_bundle() 
   
     val fw_pf=Output(new pf_from_if_bus_bundle()) //TODO:如果发现预测cache预测错误，就冲刷
     val from_id=Input(new if_from_id_bus_bundle())
@@ -27,6 +27,7 @@ class IFU extends Module {
   val if_excp_en=Wire(Bool())
   val instFetch_bits=dontTouch(Wire(Vec(2,new if_to_id_bus_data_bundle())))
   
+  /*-------------------------时序逻辑*-------------------------*/
   val if_valid_r=RegInit(false.B)
   val if_valid  =if_valid_r&& ~if_flush 
   //NOTE:对flush的行为的一种升级,这样处理可以确保flush是清除当前流水级以及当前流水级后面流水级的代码
@@ -34,7 +35,8 @@ class IFU extends Module {
   val if_clog= ~fs.rc.data_ok || if_inst_discard //是要丢弃的就阻塞住
                                                                  //后端队列满的时候不能再塞了
   if_ready_go:=Mux(if_clog&& ~if_excp_en,false.B,true.B)
-  fs.in.ready:= ~if_valid_r || if_ready_go 
+  fs.in.ready:= ~if_valid_r || if_ready_go //*没有ready？
+  
   when(if_flush){
     if_valid_r:=false.B
   }.elsewhen(fs.in.ready){ 
@@ -82,6 +84,7 @@ class IFU extends Module {
   if_dual_inst:=Mux(if_excp_en,"h03400000".U(32.W),fs.rc.rdata)
   /*NOTE:当出现例外时，把inst置为0，避免因为残留的inst出现其他没有预料的操作。
     因为if和pf级产生的例外优先级高于指令invalid例外，所以放心大胆的置为0*/
+/*-------------------------时序逻辑*-------------------------*/
 
   fs.icache_uncache:=fs.page_uncache||fs.in.bits.direct_uncache
 //---------------------------excp---------------------------

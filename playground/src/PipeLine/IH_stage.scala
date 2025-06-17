@@ -103,7 +103,7 @@ class IHU extends Module{
         issue_bits(i).src1:=regdata(i).rdata1
         inst_r1_ready(i):= true.B 
       }
-    }
+    }//确定正确的SRC
 
     when(decode_bits(i).r2_sel===SDEF(B_IMM)){
       issue_bits(i).src2:=decode_bits(i).imm
@@ -139,6 +139,7 @@ class IHU extends Module{
       }
     }
   }
+  
 //CsrUnit
   ih.from_csr.rd_addr:=MuxPriorA(decode_bits(0).inst_op===SDEF(OP_CSR)||decode_bits(0).inst_op===SDEF(OP_CNT),decode_bits).csr_addr
   //TODO:cnt类型指令该怎么双发呢

@@ -51,7 +51,7 @@ class uBtbWay extends Module with uBtbParams{
         tag   := io.write_tag
         data  := io.write_entry
     }
-}
+}//每个模块判断是否命中并返回数据，可以写入值。valid只能读入一次，不能交替
 
 class uBtb extends Module with uBtbParams with BPUtils {
     val io = IO(new Bundle{
@@ -72,10 +72,10 @@ class uBtb extends Module with uBtbParams with BPUtils {
     })
 
     val ways = Seq.tabulate(Num_Ways)(w => Module(new uBtbWay))
-    val ctrs = Seq.tabulate(Num_Ways)(w => RegInit(2.U(2.W)))
-    val replacer = new PseudoLRU(Num_Ways)
+    val ctrs = Seq.tabulate(Num_Ways)(w => RegInit(2.U(2.W)))       //生成32路的存储单位，并配备2位饱和计数器
+    val replacer = new PseudoLRU(Num_Ways)      //生成随机数
     // val replacer = new RandomReplacement(Num_Ways)
-    val replacer_touch_ways = Wire(Vec(3, Valid(UInt(log2Ceil(Num_Ways).W))))
+    val replacer_touch_ways = Wire(Vec(3, Valid(UInt(log2Ceil(Num_Ways).W)))) //生成3个带valid的索引
     // val lfsr = new LFSR64()
 
     //req every way
@@ -89,10 +89,11 @@ class uBtb extends Module with uBtbParams with BPUtils {
     // val bp_fire_1_reg = RegNext(io.in_1.bp_fire)
     // val req_pc_1_reg  = RegEnable(io.in_1.req_pc, 0.U, io.in_1.bp_fire)
 
+    //批量进行操作，查看是否命中
     ways.foreach(_.io.req_tag_0 := getTag(req_pc_0_reg))
     // ways.foreach(_.io.req_tag_0 := getTag(io.in_0.req_pc))
     // ways.foreach(_.io.req_tag_0 := getTag(io.in_0.bits.req_pc))
-
+    //命中后根据2位饱和计数器进行判断是否需要跳转
     val total_hits_oh_0 = VecInit(ways.map(_.io.resp_hit_0)).asUInt
     val hit_0 = total_hits_oh_0.orR
     // val hit = total_hits_oh.reduce(_||_)
@@ -157,7 +158,7 @@ class uBtb extends Module with uBtbParams with BPUtils {
     val u_hits_oh = VecInit(ways.map(_.io.update_hit)).asUInt
     val u_hit = u_hits_oh.orR
     val can_writes = VecInit(ways.map(_.io.can_write))
-    val has_empty  = can_writes.reduce(_||_)
+    val has_empty  = can_writes.reduce(_||_)   //.reduce用来生成更加高效的逻辑运算
     dontTouch(has_empty)
     val empty_way = PriorityEncoder(can_writes)
     dontTouch(empty_way)

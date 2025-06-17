@@ -32,7 +32,7 @@ class pf_to_if_bus_bundle extends Bundle{
   val direct_uncache=Bool()
   val pred0 = new PredictorOutput()
   val pred1 = new PredictorOutput()
-}
+}//pc npc 异常及信息 cache 两个分支预测
 
 class pf_from_if_bus_bundle extends Bundle{
   val pre_uncache_miss=Bool()

@@ -20,15 +20,16 @@ class PreIFU extends Module {
     val direct_uncache=Input(Bool())
     val sc=new InstAxiBridgeSendCannel()
     val icacop_en=Output(Bool())
-    val icacop_mode=Output(UInt(2.W))
+    val icacop_mode=Output(UInt(2.W))//icache使能及模式
 
     // val invalid_if_second = Output(new pf_invalid_if_inst_bundle)
 
-    val to_pred = Output(new PredictorInput())
+    val to_pred = Output(new PredictorInput()) //to_btb
     // val to_pred_1 = Output(new PredictorInput())
     val from_pred0 = Input(new PredictorOutput())
     val from_pred1 = Input(new PredictorOutput())
   })
+
   val flush_sign=dontTouch(Wire(Bool()))
   val pf_excp_en=Wire(Bool())
   val pf_flush =pf.from_id.br_j.taken||pf.from_ex.br_b.taken||pf.from_if.pre_uncache_miss||flush_sign 
@@ -40,6 +41,7 @@ class PreIFU extends Module {
   pf.sc.addr_en:=pf.to_if.valid
   pf.to_if.valid:=Mux(pf_flush,false.B,to_pf_valid&&pf_ready_go)
 
+/*-------------------------时序逻辑*-------------------------*/
   when(pf.from_ls.flush.idle&& ~pf.from_ih.has_int){
     idle_lock:=true.B
   }.elsewhen(pf.from_ih.has_int){
@@ -48,11 +50,13 @@ class PreIFU extends Module {
 
   val icacop_mode_reg=RegInit(0.U(2.W))
   val icacop_addr_reg=RegInit(0.U(ADDR_WIDTH.W))
+
   when(pf.from_ex.icacop_en){
     icacop_change_req_addr:=true.B
     icacop_mode_reg:=pf.from_ex.icacop_mode
     icacop_addr_reg:=pf.from_ex.icacop_addr
-  }
+  }//从exe阶段获取icache地址和模式
+
   when(pf.sc.addr_ok){
     icacop_change_req_addr:=false.B
   }
@@ -67,11 +71,12 @@ class PreIFU extends Module {
   when(fetch_req||pf.from_if.pre_uncache_miss){
     pending_nextpc:=false.B
   }
+
   //from Predictor
   // val hit = pf.from_pred0.read_hit
   val brTaken = pf.from_pred0.brTaken || (pf.from_pred1.brTaken&&nextpc_plus8)
   val brTarget = Mux(pf.from_pred0.brTaken, pf.from_pred0.entry.brTarget, pf.from_pred1.entry.brTarget)
-
+/*-------------------------时序结束-------------------------*/
 
   flush_sign:=pf.from_ls.flush.asUInt.orR
   val flushed_pc =Mux(pf.from_ls.flush.tlbrefill,pf.csr_entries.tlbentry,
@@ -86,10 +91,13 @@ class PreIFU extends Module {
   // val snpc  = Mux(hit && brTaken, brTarget,
   val snpc  = Mux(brTaken.orR, brTarget,
                 Mux(pc_no_cross_cacheline && ~pf.direct_uncache, pf_pc+8.U, pf_pc+4.U))
+                //静态只管+4还是+8
   val dnpc  = Mux(flush_sign,flushed_pc,
                   Mux(pf.from_ex.br_b.taken,pf.from_ex.br_b.target,
                     Mux(pf.from_id.br_j.taken,pf.from_id.br_j.target,
                       Mux(pf.from_if.pre_uncache_miss&&pending_nextpc,pf_pc,pf.from_if.miss_pc))))
+                //dnpc优先级：flush信号，br信号，if阶段的cache_miss信号，默认为if阶段的miss_pc信号
+
 
   dontTouch(snpc)
   dontTouch(dnpc)

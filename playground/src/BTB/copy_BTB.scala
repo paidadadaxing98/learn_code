@@ -5,7 +5,7 @@ import chisel3.util.random.LFSR
 
 
 trait  Btb_Queue {
-    val Btb_entrys = 256
+    val Btb_entrys = 512
     val Btb_ways = 2
     val Btb_sets = Btb_entrys / Btb_ways
 
@@ -33,9 +33,9 @@ object Seq_XOR {
 }
 
 trait BP_Utail extends  Btb_Queue {
-    val BP_entrys = Btb_entrys //256
+    val BP_entrys = Btb_entrys //512
     val BP_ways = Btb_ways //2
-    val BP_sets = Btb_sets //128
+    val BP_sets = Btb_sets //256
 
     //偏移取位
     def seg(pc:UInt,start:Int,size:Int): UInt = {
@@ -84,7 +84,7 @@ class Btb_entry extends Bundle with Btb_Queue{
 }
 
 class Btb_update_entry extends Bundle {
-    val require = Bool()
+    val require = Bool() //同时掌管btb和predictor
     val update_pc = UInt(32.W) 
     val data = new Btb_data()
 }
@@ -106,7 +106,7 @@ class My_Btb extends Module with BP_Utail{
         val update = Input(new Btb_update_entry)
     })
 //-----------------------读取指令的历史记录，明白跳转的目标-------------------------------//
-
+//todo 做一个栈，处理return,遇到函数就入栈，return就pop
     val Btb_bank = RegInit(VecInit(Seq.fill(Btb_sets)
                                     (VecInit(Seq.fill(Btb_ways)
                                         (0.U.asTypeOf(new Btb_entry))))))
@@ -144,18 +144,37 @@ class My_Btb extends Module with BP_Utail{
     val hit_way1 = PriorityEncoder(hits_1)
  */
 
-    //跳转目标
+    //跳转目标 //return单独做栈进行返回
+    //todo 总是倾向于同一个结果的跳转指令需要将Taken单独赋值
+    //* brType:3 --> jalr(跳转到寄存器的存的位置) ret
+    //* brType:2 --> jal(直接跳转到偏移位置)  函数跳转
+
     val target_0 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_0(i).brTarget))))
     val target_1 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_1(i).brTarget))))
+    val stack = new Stack
+    val is_jalr_0 = io.in_0.br_type === 3.U
+    val is_jalr_1 = io.in_1.br_type === 3.U
+    val is_jalr = Bool()
+    val jalr_Target_0 = UInt(32.W)
+    val jalr_Target_1 = UInt(32.W)
 
-    io.out_0.brTarget := target_0
-    io.out_1.brTarget := target_1
+    is_jalr := is_jalr_0 || is_jalr_1 
+    stack.io.pop_en_0 := is_jalr_0
+    stack.io.pop_en_1 := is_jalr_1
+    jalr_Target_0 := stack.io.out_data_0
+    jalr_Target_1 := stack.io.out_data_1
+
+    io.out_0.brTarget := Mux(is_jalr_0,jalr_Target_0,target_0)
+    io.out_1.brTarget := Mux(is_jalr_1,jalr_Target_1,target_1)
+
+
 
     //数据有效取决于是否命中
     io.out_0.valid := hit_0
     io.out_1.valid := hit_1
 
 //-------------------------------更新策略-----------------------------//
+//只有一个写入口是因为即使双发射，也只能一次跳转一个目标
     val rEntry_u =  Wire(Vec(Btb_ways,new Btb_entry))     
     val bank_idx_u = Wire(UInt(log2Ceil(Btb_entrys).W))
     val tag_u = Wire(UInt(tagsize.W))
@@ -181,9 +200,14 @@ class My_Btb extends Module with BP_Utail{
     }
 
     //有更新需求时直接更新，同时更新have位
-    when(io.update.require){
+    when(io.update.require && (io.update.data.brType === 2.U) ){
+        stack.io.push_en := 1.U
+    }.elsewhen(io.update.require){//正常更新
         Btb_bank(bank_idx_u)(w_way).data := io.update.data
+        stack.io.push_en := 0.U
     }
+
+    stack.io.in_data := io.update.update_pc + 4.U
 
     when(io.update.require && !Btb_bank(bank_idx_u)(w_way).have){
         Btb_bank(bank_idx_u)(w_way).have := !Btb_bank(bank_idx_u)(w_way).have
@@ -200,6 +224,7 @@ class My_Btb extends Module with BP_Utail{
     predictor.io.update.valid := io.update.require
     predictor.io.update.brTaken := io.update.data.brTaken
     predictor.io.update.Pre_pc := io.update.update_pc
+    predictor.io.update.brType := io.update.data.brType
 
 } 
 
@@ -207,10 +232,11 @@ class My_Btb extends Module with BP_Utail{
 
 //BHT和PHT进行预测是否该跳转
 //-------------------------------预测器定义-------------------------------//
+//todo BHT训练时间可能会比较长，可能需要再加一个比较简单的预测器进行二者仲裁或者加一个计数器
 trait  Predictor_Queue {
-    val nPHT = 128
+    val nPHT = 256
     val PHTLEN = log2Ceil(nPHT)
-    val nBHT = 128
+    val nBHT = 256
     val BHTLEN = log2Ceil(nBHT)
     val BHRLEN = log2Ceil(nBHT)
 }    
@@ -218,15 +244,16 @@ trait  Predictor_Queue {
 class Pre_Entry extends Bundle {
     val valid = Bool() //更新需求位
     val brTaken = Bool()
+    val brType = UInt(3.W)
     val Pre_pc = UInt(32.W)
 }
 
-class BhtEntry extends Bundle with Predictor_Queue{
+class Bht_Entry extends Bundle with Predictor_Queue{
     val valid = Bool()
     val bhr = UInt(BHRLEN.W)
 }
 
-class PhtEntry extends Bundle {
+class Pht_Entry extends Bundle {
     val valid = Bool()
     val ctr = UInt(2.W)
 }
@@ -242,9 +269,9 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
     })
 
     val bhtBank = RegInit(VecInit(Seq.fill(nBHT)
-                                        (0.U.asTypeOf(new BhtEntry))))
+                                        (0.U.asTypeOf(new Bht_Entry))))
     val phtBank = RegInit(VecInit(Seq.fill(nPHT)
-                                        (0.U.asTypeOf(new PhtEntry))))
+                                        (0.U.asTypeOf(new Pht_Entry))))
 //----------------------------读取操作---------------------------//    
     val bhtBank_idx_0 = Wire(UInt(BHTLEN.W))
     val bhtBank_idx_1 = Wire(UInt(BHTLEN.W))
@@ -265,6 +292,8 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
     io.Taken_1 := phtBank(phtBank_idx_1).ctr(1) && phtBank(phtBank_idx_1).valid
 
 //-----------------------------更新策略--------------------------//
+//todo 需要根据跳转指令的类型，个性化进行处理
+//todo 比如每次跳转或者每次不跳转的指令都不要进入BHT和PHT中，可能会污染预测数据
     val bhtBank_idx_u = Wire(UInt(BHTLEN.W))
     val phtBank_idx_u = Wire(UInt(PHTLEN.W))
     val bhr_u = UInt(BHRLEN.W)
@@ -285,6 +314,7 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
             bhtBank(bhtBank_idx_u).bhr := Cat(zero,io.update.brTaken)
             bhtBank(bhtBank_idx_u).valid := !bhtBank(bhtBank_idx_u).valid
         }
+
         when(phtBank(phtBank_idx_u).valid){
             phtBank(phtBank_idx_u).ctr :=BP_update(ctr_u,2,io.update.brTaken)
         }.otherwise{
@@ -294,5 +324,57 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
 
 }
 
+//------------------------------栈定义-----------------------------//
+//只有八个数据的栈，对应八层循环
+class Stack {
+    val io = IO(new Bundle{
+        val push_en  = Input(Bool())
+        val pop_en_0 = Input(Bool())
+        val pop_en_1 = Input(Bool())
+        val in_data  = Input(UInt(32.W))
+        val out_data_0 = Output(UInt(32.W))
+        val out_data_1 = Output(UInt(32.W))
+    })
+    val empty_0 = Bool()
+    val empty_1 = Bool() 
+    val full   = Bool()
+    val ptr    = UInt(3.W)
+    val stack_bank = RegInit(Vec(8,(UInt(32.W))))
+    val both = Bool()
+    val pop_one = Bool()
+    val pop_two = Bool()
+    both := (pop_one || pop_two) && io.push_en //两种操作同时有
+    pop_one := (io.pop_en_0 && !io.pop_en_1) || (!io.pop_en_0 && io.pop_en_1)
+    pop_two := (io.pop_en_0 && io.pop_en_1)
+    empty_0 := ptr === 0.U 
+    empty_1 := ptr === 1.U //输出两个的时候
+    
+    full  := ptr === 7.U && io.push_en 
 
+    when(io.push_en && !full && !both){
+        stack_bank(ptr) := io.in_data //当前位置
+        ptr := ptr + 1.U //下一拍更新 
+        //*备用（解决满的情况）：ptr := (ptr + 1.U)%8,性能会降低？
+    }.elsewhen(pop_one && !empty_0 && !both){
+        ptr := ptr - 1.U
+    }.elsewhen(pop_two && !empty_1 && !both){
+        ptr := ptr - 2.U
+    }.elsewhen(pop_two && !empty_1 && both){
+        ptr := ptr - 1.U
+    }.elsewhen(pop_two && empty_1){
+        ptr := ptr - 1.U
+    }
+    //默认先执行第一条，再执行第二条
+    //io.out_data_0 := Mux(empty_0 && pop_two,0.U,
+    io.out_data_0 := Mux(both && pop_two,io.in_data,
+                        Mux(pop_two && !empty_0,stack_bank(ptr - 1.U),
+                            Mux(pop_one && io.pop_en_0,stack_bank(ptr - 1.U),0.U))) //总是指向数据高一格
+   // io.out_data_1 := Mux(empty_1 && pop_two,0.U,
+    io.out_data_1 :=  Mux(both && pop_two,stack_bank(ptr - 1.U),
+                        Mux(pop_two && !empty_0 && !empty_1,stack_bank(ptr - 2.U),
+                            Mux(pop_one && io.pop_en_1,stack_bank(ptr - 1.U),0.U)))
+//没有考虑满的情况，最多支持8层循环
+//todo 应用时的接口改一下，执行一条时的赋值问题改一下
+
+}
 

@@ -74,24 +74,24 @@ class Btb_data extends Bundle with Btb_Queue{
     val valid = Bool()
     val brTaken = Bool()
     val brTarget = UInt(32.W)
-    val brType = UInt(brTypeNum.W)
 }
 
 class Btb_entry extends Bundle with Btb_Queue{
     val have = Bool()
     val tag = UInt(tagsize.W)
+    val Type = UInt(3.W)
     val data = new Btb_data()
 }
 
 class Btb_update_entry extends Bundle {
     val require = Bool() //同时掌管btb和predictor
     val update_pc = UInt(32.W) 
+    val br_type = UInt(32.W) //需要在译码阶段传入跳转指令的类型
     val data = new Btb_data()
 }
 
 class PreInput extends Bundle {
     val bp_fire = Bool() //检测到是分支
-    val br_type = UInt(32.W) //需要在译码阶段传入跳转指令的类型
     val req_pc  = UInt(32.W)
 }
 
@@ -139,21 +139,22 @@ class My_Btb extends Module with BP_Utail{
     val hit_0 = hits_0.reduce(_ | _)
     val hit_1 = hits_1.reduce(_ | _)
 
-/*     //返回第一个true的值对应的索引
+    //返回第一个true的值对应的索引
     val hit_way0 = PriorityEncoder(hits_0)
     val hit_way1 = PriorityEncoder(hits_1)
- */
+ 
 
     //跳转目标 //return单独做栈进行返回
     //todo 总是倾向于同一个结果的跳转指令需要将Taken单独赋值
+    //?如何在不污染BTB的条件下直接获取跳转的类型？
     //* brType:3 --> jalr(跳转到寄存器的存的位置) ret
     //* brType:2 --> jal(直接跳转到偏移位置)  函数跳转
 
     val target_0 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_0(i).brTarget))))
     val target_1 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_1(i).brTarget))))
     val stack = new Stack
-    val is_jalr_0 = io.in_0.br_type === 3.U
-    val is_jalr_1 = io.in_1.br_type === 3.U
+    val is_jalr_0 = rEntry_0(hit_way0).Type === 3.U
+    val is_jalr_1 = rEntry_1(hit_way1).Type === 3.U
     val is_jalr = Wire(Bool())
     val jalr_Target_0 = Wire(UInt(32.W))
     val jalr_Target_1 = Wire(UInt(32.W))
@@ -182,13 +183,13 @@ class My_Btb extends Module with BP_Utail{
     val rEntry_u =  Wire(Vec(Btb_ways,new Btb_entry))     
     val bank_idx_u = Wire(UInt(log2Ceil(Btb_entrys).W))
     val tag_u = Wire(UInt(tagsize.W))
-    val hits_u =  (0 until Btb_ways).map(i => rEntry_u(i).tag === tag_u && rEntry_u(i).have)
+    val hits_u =  (0 until Btb_ways).map(i => (rEntry_u(i).tag === tag_u) && rEntry_u(i).have)
     val lfsr = LFSR(log2Ceil(Btb_sets), io.update.require)
 
     bank_idx_u := get_idx(io.update.update_pc,32,idx_len)
     rEntry_u := Btb_bank(bank_idx_u) 
     tag_u := seg(io.update.update_pc,2,tagsize)
-
+  
 /*     val update_require_r = Reg(Bool())
     update_require_r := io.update.require  //大概需要完善 */
     //*选择路的策略：1.命中时更新数据  2.哪一个为空写入哪一个 3.随机输入一个
@@ -202,9 +203,9 @@ class My_Btb extends Module with BP_Utail{
     }.otherwise{
         w_way := (lfsr ^ bank_idx_u).xorR  //
     }
-
+    Btb_bank(bank_idx_u)(w_way).Type := io.update.br_type
     //有更新需求时直接更新，同时更新have位
-    when(io.update.require && (io.update.data.brType === 2.U) ){
+    when(io.update.require && (io.update.br_type === 2.U) ){
         stack.io.push_en := 1.U
     }.elsewhen(io.update.require){//正常更新
         Btb_bank(bank_idx_u)(w_way).data := io.update.data
@@ -219,8 +220,8 @@ class My_Btb extends Module with BP_Utail{
 
 //-----------------------------加入预测器-------------------------------//
     val predictor = Module(new my_Predictor)
-    predictor.io.pc_in0 := io.in_0
-    predictor.io.pc_in1 := io.in_1
+    predictor.io.pc_in0 := io.in_0.req_pc
+    predictor.io.pc_in1 := io.in_1.req_pc
     //读取数据
     io.out_0.brTaken := predictor.io.Taken_0
     io.out_1.brTaken := predictor.io.Taken_1
@@ -228,7 +229,7 @@ class My_Btb extends Module with BP_Utail{
     predictor.io.update.valid := io.update.require
     predictor.io.update.brTaken := io.update.data.brTaken
     predictor.io.update.Pre_pc := io.update.update_pc
-    predictor.io.update.brType := io.update.data.brType
+    predictor.io.update.brType := io.update.br_type
 
 } 
 

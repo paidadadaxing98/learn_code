@@ -14,8 +14,8 @@ class PredictorUpdate extends Bundle {
     val valid   = Bool()
     val pc    = UInt(ADDR_WIDTH.W)
     val brTaken   = Bool()
-    // val brType    = UInt(BrTypeWidth.W)
-    val entry = new BTBEntry
+    val brType    = UInt(3.W)
+    val entry = new BTBEntry // taken target
 }
 
 class regfile_wdata_bundle extends Bundle{

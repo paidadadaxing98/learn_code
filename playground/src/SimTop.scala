@@ -283,7 +283,7 @@ class SimTop extends Module {
   lsu.ls.rc.data_ok:=dcache.io.data_ok
   lsu.ls.rc.rdata  :=dcache.io.rdata
   //Predictor
-  val ubtb = Module(new uBtb())
+/*   val ubtb = Module(new uBtb())
   // val ubtb = Module(new BTB())
   // ubtb.io.in_0 <> pfu.pf.to_pred
   ubtb.io.in_0 := pfu.pf.to_pred
@@ -303,6 +303,23 @@ class SimTop extends Module {
   ubtb.io.update := lsu.ls.ubtb_update
   pfu.pf.from_pred0 := ubtb.io.out_0
   pfu.pf.from_pred1 := ubtb.io.out_1
+ */
+
+  val btb = Module(new My_Btb())
+  btb.io.in_0 := pfu.pf.to_pred
+  btb.io.in_1.bp_fire := pfu.pf.to_pred.bp_fire
+  btb.io.in_1.req_pc := pfu.pf.to_pred.req_pc + 4.U
+  pfu.pf.from_pred0.brTaken := btb.io.out_0.brTaken
+  pfu.pf.from_pred0.entry.brTarget := btb.io.out_0.brTarget
+  pfu.pf.from_pred1.brTaken := btb.io.out_1.brTaken
+  pfu.pf.from_pred1.entry.brTarget := btb.io.out_1.brTarget//Type没有用上，先不接了
+//更新接口
+  btb.io.update.require := lsu.ls.ubtb_update.valid
+  btb.io.update.update_pc := lsu.ls.ubtb_update.pc
+  btb.io.update.br_type := lsu.ls.ubtb_update.brType //todo 流水线上没有这个信号
+  btb.io.update.data.brTaken := lsu.ls.ubtb_update.brTaken
+  btb.io.update.data.brTarget := lsu.ls.ubtb_update.entry.brTarget
+
 
 //lsu
   exu.ex.to_ls.allowin:=lsu.ls.in.allowin

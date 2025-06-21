@@ -47,6 +47,7 @@ trait BPUtils {
 class BTBEntry extends Bundle {
     // val isBrCond = Bool()   //
     // val isBrJmp  = Bool()
+    
     val brType   = UInt(BrTypeWidth.W)
     val brTarget = UInt(ADDR_WIDTH.W)
 
@@ -71,7 +72,7 @@ class PredictorOutput extends Bundle {
     // val brTaken         = UInt(FetchWidth.W)
     // val firstTaken      = Bool()
     val brTaken         = Bool()
-    val entry           = new BTBEntry()
+    val entry           = new BTBEntry() //Type Target 
     // val fallThroughAddr = UInt(ADDR_WIDTH.W)
 }
 

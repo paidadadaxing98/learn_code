@@ -154,18 +154,22 @@ class My_Btb extends Module with BP_Utail{
     val stack = new Stack
     val is_jalr_0 = io.in_0.br_type === 3.U
     val is_jalr_1 = io.in_1.br_type === 3.U
-    val is_jalr = Bool()
-    val jalr_Target_0 = UInt(32.W)
-    val jalr_Target_1 = UInt(32.W)
-
+    val is_jalr = Wire(Bool())
+    val jalr_Target_0 = Wire(UInt(32.W))
+    val jalr_Target_1 = Wire(UInt(32.W))
+    val jalr_en_0 = Wire(Bool())
+    val jalr_en_1 = Wire(Bool())
     is_jalr := is_jalr_0 || is_jalr_1 
     stack.io.pop_en_0 := is_jalr_0
     stack.io.pop_en_1 := is_jalr_1
+
+    jalr_en_0 := stack.io.out_en_0
+    jalr_en_1 := stack.io.out_en_1
     jalr_Target_0 := stack.io.out_data_0
     jalr_Target_1 := stack.io.out_data_1
 
-    io.out_0.brTarget := Mux(is_jalr_0,jalr_Target_0,target_0)
-    io.out_1.brTarget := Mux(is_jalr_1,jalr_Target_1,target_1)
+    io.out_0.brTarget := Mux(is_jalr_0 && jalr_en_0,jalr_Target_0,target_0)
+    io.out_1.brTarget := Mux(is_jalr_1 && jalr_en_1,jalr_Target_1,target_1)
 
 
 
@@ -296,9 +300,9 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
 //todo 比如每次跳转或者每次不跳转的指令都不要进入BHT和PHT中，可能会污染预测数据
     val bhtBank_idx_u = Wire(UInt(BHTLEN.W))
     val phtBank_idx_u = Wire(UInt(PHTLEN.W))
-    val bhr_u = UInt(BHRLEN.W)
-    val ctr_u = UInt(2.W)
-    val zero = UInt(1.W)
+    val bhr_u = Wire(UInt(BHRLEN.W))
+    val ctr_u = Wire(UInt(2.W))
+    val zero = Wire(UInt(2.W))
     zero := 0.U
     bhtBank_idx_u := get_idx(io.update.Pre_pc,32,BHTLEN)
     bhr_u := bhtBank(bhtBank_idx_u).bhr
@@ -306,18 +310,19 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
     ctr_u := phtBank(phtBank_idx_u).ctr
 
 //当有更新请求时进行更新，
-//bht和pht数据更新依据是否写过，写过就正常更新，没写过就更新valid位
+//bht和pht数据更新依据是否写过，写过就正常更新，没写过就更新valid位并输入当前信息
     when(io.update.valid){
         when(bhtBank(bhtBank_idx_u).valid){
             bhtBank(bhtBank_idx_u).bhr := Cat(bhtBank(bhtBank_idx_u).bhr(BHRLEN - 2,0),io.update.brTaken)
         }.otherwise{
-            bhtBank(bhtBank_idx_u).bhr := Cat(zero,io.update.brTaken)
+            bhtBank(bhtBank_idx_u).bhr := Cat(zero,io.update.brTaken) 
             bhtBank(bhtBank_idx_u).valid := !bhtBank(bhtBank_idx_u).valid
         }
 
         when(phtBank(phtBank_idx_u).valid){
-            phtBank(phtBank_idx_u).ctr :=BP_update(ctr_u,2,io.update.brTaken)
+            phtBank(phtBank_idx_u).ctr := BP_update(ctr_u,2,io.update.brTaken)
         }.otherwise{
+            phtBank(phtBank_idx_u).ctr := BP_update(0.U,2,io.update.brTaken)
             phtBank(phtBank_idx_u).valid := !phtBank(phtBank_idx_u).valid
         }
     }
@@ -332,17 +337,29 @@ class Stack {
         val pop_en_0 = Input(Bool())
         val pop_en_1 = Input(Bool())
         val in_data  = Input(UInt(32.W))
+        val out_en_0 = Output(Bool())
+        val out_en_1 = Output(Bool())
         val out_data_0 = Output(UInt(32.W))
         val out_data_1 = Output(UInt(32.W))
     })
-    val empty_0 = Bool()
-    val empty_1 = Bool() 
-    val full   = Bool()
-    val ptr    = UInt(3.W)
+    val empty_0 = Wire(Bool())
+    val empty_1 = Wire(Bool()) 
+    val full   = Wire(Bool())
+    val ptr    = Reg(UInt(3.W))
+    val both = Wire(Bool())
+    val pop_one = Wire(Bool())
+    val pop_two = Wire(Bool())
+    val zero_have = Reg(Bool()) //指向零位置的情况有两种，可能有数，可能是空的
+    val pop1_suc = Wire(Bool())
+    val pop2_suc = Wire(Bool())
+    
     val stack_bank = RegInit(Vec(8,(UInt(32.W))))
-    val both = Bool()
-    val pop_one = Bool()
-    val pop_two = Bool()
+    pop1_suc := (pop_one && zero_have )  
+    pop2_suc := pop_two && !empty_0 && empty_1  //针对0位置有无数据的两种状态
+    io.out_en_0 := io.out_data_0 =/= 0.U
+    io.out_en_1 := io.out_data_1 =/= 0.U
+
+
     both := (pop_one || pop_two) && io.push_en //两种操作同时有
     pop_one := (io.pop_en_0 && !io.pop_en_1) || (!io.pop_en_0 && io.pop_en_1)
     pop_two := (io.pop_en_0 && io.pop_en_1)
@@ -351,18 +368,27 @@ class Stack {
     
     full  := ptr === 7.U && io.push_en 
 
+    stack_bank(ptr) := io.in_data //当前位置
+
     when(io.push_en && !full && !both){
-        stack_bank(ptr) := io.in_data //当前位置
         ptr := ptr + 1.U //下一拍更新 
         //*备用（解决满的情况）：ptr := (ptr + 1.U)%8,性能会降低？
     }.elsewhen(pop_one && !empty_0 && !both){
         ptr := ptr - 1.U
-    }.elsewhen(pop_two && !empty_1 && !both){
+    }.elsewhen(pop_two && !empty_0 && !empty_1 && !both){
+        //* !empty_0 && !empty_1相当于大于一
         ptr := ptr - 2.U
-    }.elsewhen(pop_two && !empty_1 && both){
+    }.elsewhen(pop_two && !empty_0 && !empty_1 && both){
         ptr := ptr - 1.U
     }.elsewhen(pop_two && empty_1){
         ptr := ptr - 1.U
+    }
+    when(io.push_en && empty_0 && !both){
+        zero_have := 1.U
+    }.elsewhen((pop1_suc || pop2_suc) && (!both)){
+        zero_have := 0.U
+    }.elsewhen((pop1_suc || pop2_suc) && (both)){
+        zero_have := 1.U
     }
     //默认先执行第一条，再执行第二条
     //io.out_data_0 := Mux(empty_0 && pop_two,0.U,

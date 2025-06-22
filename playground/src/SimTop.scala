@@ -311,15 +311,20 @@ class SimTop extends Module {
   btb.io.in_1.req_pc := pfu.pf.to_pred.req_pc + 4.U
   pfu.pf.from_pred0.brTaken := btb.io.out_0.brTaken
   pfu.pf.from_pred0.entry.brTarget := btb.io.out_0.brTarget
+  pfu.pf.from_pred0.entry.brType := btb.io.out_0.brType
   pfu.pf.from_pred1.brTaken := btb.io.out_1.brTaken
-  pfu.pf.from_pred1.entry.brTarget := btb.io.out_1.brTarget//Type没有用上，先不接了
+  pfu.pf.from_pred1.entry.brTarget := btb.io.out_1.brTarget
+  pfu.pf.from_pred1.entry.brType := btb.io.out_1.brType
+
+
 //更新接口
   btb.io.update.require := lsu.ls.ubtb_update.valid
   btb.io.update.update_pc := lsu.ls.ubtb_update.pc
-  btb.io.update.br_type := lsu.ls.ubtb_update.brType //todo 流水线上没有这个信号
-  btb.io.update.data.brTaken := lsu.ls.ubtb_update.brTaken
-  btb.io.update.data.brTarget := lsu.ls.ubtb_update.entry.brTarget
-
+  btb.io.update.br_type := lsu.ls.ubtb_update.brType //todo 流水线上没有这个信号,注释掉了
+  btb.io.update.brTaken := lsu.ls.ubtb_update.brTaken
+  btb.io.update.brTarget := lsu.ls.ubtb_update.entry.brTarget
+  println(btb.io)
+  
 
 //lsu
   exu.ex.to_ls.allowin:=lsu.ls.in.allowin

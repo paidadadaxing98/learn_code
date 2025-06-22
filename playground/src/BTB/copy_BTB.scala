@@ -55,7 +55,7 @@ trait BP_Utail extends  Btb_Queue {
     def get_idx(pc:UInt,pc_len:Int,len:Int) = {
         if(pc_len > 0){
             val nChunks = (pc_len + len - 1) / len
-            val seq_Chunks = (0 until nChunks).map {i => 
+            val seq_Chunks = (0 until nChunks-1).map {i => 
                 if((i + 1)*len > pc_len) {
                     pc(pc_len - 1,i * len)
                 }
@@ -70,9 +70,16 @@ trait BP_Utail extends  Btb_Queue {
 
 }
 
-class Btb_data extends Bundle with Btb_Queue{
+class PreOutput extends Bundle with Btb_Queue{
     val valid = Bool()
     val brTaken = Bool()
+    val brType = UInt(3.W)
+    val brTarget = UInt(32.W)
+}
+
+class Btb_data extends Bundle with Btb_Queue{
+    val brTaken = Bool()
+    val brType = UInt(3.W)
     val brTarget = UInt(32.W)
 }
 
@@ -86,8 +93,9 @@ class Btb_entry extends Bundle with Btb_Queue{
 class Btb_update_entry extends Bundle {
     val require = Bool() //同时掌管btb和predictor
     val update_pc = UInt(32.W) 
-    val br_type = UInt(32.W) //需要在译码阶段传入跳转指令的类型
-    val data = new Btb_data()
+    val br_type = UInt(3.W) //需要在译码阶段传入跳转指令的类型
+    val brTaken = Bool()
+    val brTarget = UInt(32.W)
 }
 
 class PreInput extends Bundle {
@@ -100,8 +108,8 @@ class My_Btb extends Module with BP_Utail{
         val in_0 =  Input(new PreInput)
         val in_1 =  Input(new PreInput)
 
-        val out_0 = Output(new  Btb_data)
-        val out_1 = Output(new  Btb_data)
+        val out_0 = Output(new  PreOutput)
+        val out_1 = Output(new  PreOutput)
 
         val update = Input(new Btb_update_entry)
     })
@@ -111,8 +119,8 @@ class My_Btb extends Module with BP_Utail{
                                     (VecInit(Seq.fill(Btb_ways)
                                         (0.U.asTypeOf(new Btb_entry))))))
 
-    val bank_idx_0 = Wire(UInt(log2Ceil(Btb_entrys).W))
-    val bank_idx_1 = Wire(UInt(log2Ceil(Btb_entrys).W))
+    val bank_idx_0 = Wire(UInt(log2Ceil(Btb_sets).W))
+    val bank_idx_1 = Wire(UInt(log2Ceil(Btb_sets).W))
 
     val tag_0 = Wire(UInt(tagsize.W))
     val tag_1 = Wire(UInt(tagsize.W))
@@ -152,7 +160,10 @@ class My_Btb extends Module with BP_Utail{
 
     val target_0 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_0(i).brTarget))))
     val target_1 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_1(i).brTarget))))
-    val stack = new Stack
+    val brType_0 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_0(i).brType))))
+    val brType_1 = PriorityMux(Seq.tabulate(Btb_ways)(i => ((hits_0(i)) -> (rDatas_1(i).brType))))
+    val stack = Module(new Stack())
+    println(stack.io)
     val is_jalr_0 = rEntry_0(hit_way0).Type === 3.U
     val is_jalr_1 = rEntry_1(hit_way1).Type === 3.U
     val is_jalr = Wire(Bool())
@@ -172,7 +183,8 @@ class My_Btb extends Module with BP_Utail{
     io.out_0.brTarget := Mux(is_jalr_0 && jalr_en_0,jalr_Target_0,target_0)
     io.out_1.brTarget := Mux(is_jalr_1 && jalr_en_1,jalr_Target_1,target_1)
 
-
+    io.out_0.brType := brType_0
+    io.out_1.brType := brType_1
 
     //数据有效取决于是否命中
     io.out_0.valid := hit_0
@@ -181,7 +193,7 @@ class My_Btb extends Module with BP_Utail{
 //-------------------------------更新策略-----------------------------//
 //只有一个写入口是因为即使双发射，也只能一次跳转一个目标
     val rEntry_u =  Wire(Vec(Btb_ways,new Btb_entry))     
-    val bank_idx_u = Wire(UInt(log2Ceil(Btb_entrys).W))
+    val bank_idx_u = Wire(UInt(log2Ceil(Btb_sets).W))
     val tag_u = Wire(UInt(tagsize.W))
     val hits_u =  (0 until Btb_ways).map(i => (rEntry_u(i).tag === tag_u) && rEntry_u(i).have)
     val lfsr = LFSR(log2Ceil(Btb_sets), io.update.require)
@@ -193,7 +205,7 @@ class My_Btb extends Module with BP_Utail{
 /*     val update_require_r = Reg(Bool())
     update_require_r := io.update.require  //大概需要完善 */
     //*选择路的策略：1.命中时更新数据  2.哪一个为空写入哪一个 3.随机输入一个
-    val w_way = UInt(1.W)
+    val w_way = Reg(UInt(1.W))
     when(hits_u.reduce(_ || _) ){
         w_way := Mux(hits_u(0),0.U,1.U)
     }.elsewhen(!rEntry_u(0).have){
@@ -207,13 +219,16 @@ class My_Btb extends Module with BP_Utail{
     //有更新需求时直接更新，同时更新have位
     when(io.update.require && (io.update.br_type === 2.U) ){
         stack.io.push_en := 1.U
-    }.elsewhen(io.update.require){//正常更新
-        Btb_bank(bank_idx_u)(w_way).data := io.update.data
+    }.otherwise{//正常更新
         stack.io.push_en := 0.U
     }
 
     stack.io.in_data := io.update.update_pc + 4.U
-
+    when(io.update.require && (io.update.br_type =/= 2.U)){
+        Btb_bank(bank_idx_u)(w_way).data.brTaken := io.update.brTaken
+        Btb_bank(bank_idx_u)(w_way).data.brTarget := io.update.brTarget
+        Btb_bank(bank_idx_u)(w_way).data.brType  := io.update.br_type
+    }
     when(io.update.require && !Btb_bank(bank_idx_u)(w_way).have){
         Btb_bank(bank_idx_u)(w_way).have := !Btb_bank(bank_idx_u)(w_way).have
     }
@@ -227,7 +242,7 @@ class My_Btb extends Module with BP_Utail{
     io.out_1.brTaken := predictor.io.Taken_1
     //更新的接口
     predictor.io.update.valid := io.update.require
-    predictor.io.update.brTaken := io.update.data.brTaken
+    predictor.io.update.brTaken := io.update.brTaken
     predictor.io.update.Pre_pc := io.update.update_pc
     predictor.io.update.brType := io.update.br_type
 
@@ -332,7 +347,7 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
 
 //------------------------------栈定义-----------------------------//
 //只有八个数据的栈，对应八层循环
-class Stack {
+class Stack extends Module{
     val io = IO(new Bundle{
         val push_en  = Input(Bool())
         val pop_en_0 = Input(Bool())
@@ -354,7 +369,7 @@ class Stack {
     val pop1_suc = Wire(Bool())
     val pop2_suc = Wire(Bool())
     
-    val stack_bank = RegInit(Vec(8,(UInt(32.W))))
+    val stack_bank = RegInit(VecInit(Seq.fill(8)(0.U(32.W))))
     pop1_suc := (pop_one && zero_have )  
     pop2_suc := pop_two && !empty_0 && empty_1  //针对0位置有无数据的两种状态
     io.out_en_0 := io.out_data_0 =/= 0.U

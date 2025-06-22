@@ -50,8 +50,9 @@ class BTBEntry extends Bundle {
     
     val brType   = UInt(BrTypeWidth.W)
     val brTarget = UInt(ADDR_WIDTH.W)
-
 }
+
+
 class BTBEntryWithTag extends Bundle with BPUtils{
     val valid = Bool()
     val tag = UInt(tagSize.W)

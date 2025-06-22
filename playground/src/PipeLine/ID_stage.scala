@@ -120,6 +120,7 @@ class IDU extends Module{
   }
 
   val predictorUpdate = Wire(Vec(FetchWidth, new PredictorUpdate()))
+      predictorUpdate := VecInit(Seq.fill(FetchWidth)(0.U.asTypeOf(new PredictorUpdate())))
   for( i <- 0 until FetchWidth ){
     predictorUpdate(i).valid := isBrJmp(i)  //if inst is valid, need update
     predictorUpdate(i).pc := decode_bits(i).pc

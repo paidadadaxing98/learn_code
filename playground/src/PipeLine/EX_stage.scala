@@ -105,6 +105,7 @@ class EXU extends Module {
   }
 
   val predictorUpdate = Wire(Vec(FetchWidth, new PredictorUpdate()))
+      predictorUpdate := VecInit(Seq.fill(FetchWidth)(0.U.asTypeOf(new PredictorUpdate())))
   for( i <- 0 until FetchWidth ){
     predictorUpdate(i).valid := (ex.in.bits(i).isBrCond && ex_valid(i)) //if inst is valid, need update
     predictorUpdate(i).pc := ex.to_ls.bits(i).pc

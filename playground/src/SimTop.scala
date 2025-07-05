@@ -73,6 +73,9 @@ class SimTop extends Module {
     val debug1_wb_rf_wen  =Output(UInt(4.W))
     val debug1_wb_rf_wnum =Output(UInt(5.W))
     val debug1_wb_rf_wdata=Output(UInt(DATA_WIDTH.W))
+
+    val debug_counter_all = Output(UInt(32.W))
+    val debug_counter_hit = Output(UInt(32.W))
   })
 
   {
@@ -315,7 +318,8 @@ class SimTop extends Module {
   pfu.pf.from_pred1.brTaken := btb.io.out_1.brTaken
   pfu.pf.from_pred1.entry.brTarget := btb.io.out_1.brTarget
   pfu.pf.from_pred1.entry.brType := btb.io.out_1.brType
-
+  io.debug_counter_all := btb.io.counter_all
+  io.debug_counter_hit := btb.io.counter_hit
 
 //更新接口
   btb.io.update.require := lsu.ls.ubtb_update.valid

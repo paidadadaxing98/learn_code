@@ -30,13 +30,7 @@ object Seq_XOR {
     }
 }
 
-object counter {
-    def apply(old:UInt,width:Int,enable:Bool):UInt = {
-        val max = ((1 << width) - 1).U
-        Mux(enable && (old === max),max,
-            Mux(enable,old + 1.U,old))
-    }
-}
+
 
 trait BP_Utail extends  Btb_Queue {
     val BP_entrys = Btb_entrys 
@@ -124,7 +118,7 @@ class My_Btb extends Module with BP_Utail{
     val Btb_bank = RegInit(VecInit(Seq.fill(Btb_sets)
                                     (VecInit(Seq.fill(Btb_ways)
                                         (0.U.asTypeOf(new Btb_entry))))))
-    // 加入预测器
+//---------------------------加入预测器---------------------------//
     val predictor = Module(new my_Predictor)
     predictor.io.pc_in0 := io.in_0.req_pc
     predictor.io.pc_in1 := io.in_1.req_pc
@@ -134,43 +128,39 @@ class My_Btb extends Module with BP_Utail{
     io.out_1.brTaken := predictor.io.Taken_1
     
     //更新的接口
-    predictor.io.update.valid := io.update.require
+    //只有条件跳转需要预测taken
+    predictor.io.update.valid := io.update.require && (io.update.brTarget === 1.U)
     predictor.io.update.brTaken := io.update.brTaken
     predictor.io.update.Pre_pc := io.update.update_pc
     predictor.io.update.brType := io.update.br_type
 
+//---------------------------读取BTB---------------------------//
     val bank_idx_0 = Wire(UInt(log2Ceil(Btb_sets).W))
     val bank_idx_1 = Wire(UInt(log2Ceil(Btb_sets).W))
-    bank_idx_0 := (get_idx(io.in_0.req_pc, 32, idx_len) & (Btb_sets - 1).U ) 
-    bank_idx_1 := (get_idx(io.in_1.req_pc, 32, idx_len) & (Btb_sets - 1).U ) 
-
     val tag_0 = Wire(UInt(tagsize.W))
     val tag_1 = Wire(UInt(tagsize.W))
+    val rSet_0 = Wire(Vec(Btb_ways,new Btb_entry))
+    val rSet_1 = Wire(Vec(Btb_ways,new Btb_entry))
 
+    bank_idx_0 := (get_idx(io.in_0.req_pc, 32, idx_len) & (Btb_sets - 1).U ) 
+    bank_idx_1 := (get_idx(io.in_1.req_pc, 32, idx_len) & (Btb_sets - 1).U ) 
     tag_0 := io.in_0.req_pc(31, 32-tagsize)
     tag_1 := io.in_1.req_pc(31, 32-tagsize)
-
-    val rEntry_0 = Wire(Vec(Btb_ways,new Btb_entry))
-    val rEntry_1 = Wire(Vec(Btb_ways,new Btb_entry))
-    rEntry_0 := Btb_bank(bank_idx_0)
-    rEntry_1 := Btb_bank(bank_idx_1)
-
-    //将type存在btb中
-    val rTargets_0 = VecInit((0 until Btb_ways).map(i => rEntry_0(i).Target))
-    val rTargets_1 = VecInit((0 until Btb_ways).map(i => rEntry_1(i).Target))
-    val rTypes_0 = VecInit((0 until Btb_ways).map(i => rEntry_0(i).Type))
-    val rTypes_1 = VecInit((0 until Btb_ways).map(i => rEntry_1(i).Type))
+    rSet_0 := Btb_bank(bank_idx_0)
+    rSet_1 := Btb_bank(bank_idx_1)
 
     //是跳转指令且标签一致，就是命中
-    val hits_0 = VecInit((0 until Btb_ways).map(i => rEntry_0(i).tag === tag_0
-                                                && io.in_0.bp_fire && rEntry_0(i).dirty))
-    val hits_1 = VecInit((0 until Btb_ways).map(i => rEntry_1(i).tag === tag_1 
-                                                && io.in_1.bp_fire && rEntry_1(i).dirty))
+    //todo 考虑是否需要未堵塞信号bp_fire
+    val hits_0 = VecInit((0 until Btb_ways).map(i => rSet_0(i).tag === tag_0
+                                                && io.in_0.bp_fire && rSet_0(i).dirty))
+    val hits_1 = VecInit((0 until Btb_ways).map(i => rSet_1(i).tag === tag_1 
+                                                && io.in_1.bp_fire && rSet_1(i).dirty))
 
     val hit_0 = hits_0.reduce(_ || _)
     val hit_1 = hits_1.reduce(_ || _)
 
     //更新LRu计数器
+    //相当于被替换的优先级，数字小的先被替换
     when(hit_0) {
         val hit_way0 = PriorityEncoder(hits_0)
         for (i <- 0 until Btb_ways) {
@@ -197,8 +187,106 @@ class My_Btb extends Module with BP_Utail{
         }
     }
 
-    // ================= 计数器优化实现 =================
+    //------------------针对不同类型的跳转指令选用BTB或者RSB----------------//
+    //返回第一个true的值对应的索引
+    val hit_way0 = PriorityEncoder(hits_0)
+    val hit_way1 = PriorityEncoder(hits_1)
+
+    val rTargets_0 = VecInit((0 until Btb_ways).map(i => rSet_0(i).Target))
+    val rTargets_1 = VecInit((0 until Btb_ways).map(i => rSet_1(i).Target))
+    val rTypes_0 = VecInit((0 until Btb_ways).map(i => rSet_0(i).Type))
+    val rTypes_1 = VecInit((0 until Btb_ways).map(i => rSet_1(i).Type))
+
+    val target_0 = Mux1H(hits_0, rTargets_0)
+    val target_1 = Mux1H(hits_1, rTargets_1)
+    val brType_0 = Mux1H(hits_0, rTypes_0)
+    val brType_1 = Mux1H(hits_1, rTypes_1)
+    //-----------------------接入RSB--------------------------//
+    val Rsb = Module(new Stack())
+    
+    val is_jalr_0 = hit_0 && (brType_0 === 4.U)
+    val is_jalr_1 = hit_1 && (brType_1 === 4.U)
+    val is_jalr = is_jalr_0 || is_jalr_1 
+    
+    Rsb.io.pop_en_0 := is_jalr_0
+    Rsb.io.pop_en_1 := is_jalr_1
+
+    val jalr_en_0 = Rsb.io.out_en_0
+    val jalr_en_1 = Rsb.io.out_en_1
+    val jalr_Target_0 = Rsb.io.out_data_0
+    val jalr_Target_1 = Rsb.io.out_data_1
+
+    io.out_0.brTarget := Mux(is_jalr_0 && jalr_en_0, jalr_Target_0, target_0)
+    io.out_1.brTarget := Mux(is_jalr_1 && jalr_en_1, jalr_Target_1, target_1)
+
+    io.out_0.brType := brType_0
+    io.out_1.brType := brType_1
+
+    //数据有效取决于是否命中
+    //todo 其实不需要valid位(？或者说是需要给后面阶段对比)，pf阶段如果brTaken == 0,默认+4或者+8
+    io.out_0.valid := hit_0 || jalr_en_0
+    io.out_1.valid := hit_1 || jalr_en_1
+
+    //-----------------------------更新策略-----------------------------//
+    val wSet_u = Wire(Vec(Btb_ways,new Btb_entry))     
+    val bank_idx_u = Wire(UInt(log2Ceil(Btb_sets).W))
+    val tag_u = Wire(UInt(tagsize.W))
+    val hits_u = VecInit((0 until Btb_ways).map(i => (wSet_u(i).tag === tag_u)
+                                            && wSet_u(i).dirty))
+    val lfsr = LFSR(2, io.update.require) // 修正位宽
+
+    bank_idx_u := get_idx(io.update.update_pc,32,idx_len) & (Btb_sets - 1).U //防止溢出
+    wSet_u := Btb_bank(bank_idx_u) 
+    tag_u := seg(io.update.update_pc,2,tagsize)
+
+    val w_way = Reg(UInt(1.W))
+    when(hits_u.reduce(_ || _)) {
+        // 如果命中，更新对应的way
+        w_way := Mux(hits_u(0), 0.U, 1.U)
+    }.elsewhen(!wSet_u(0).dirty) {
+        // 优先使用空的way
+        w_way := 0.U
+    }.elsewhen(!wSet_u(1).dirty) {
+        w_way := 1.U
+    }.otherwise {
+        // 使用LRU策略替换最久未使用的
+        val lru_way = Mux(wSet_u(0).lru_counter < wSet_u(1).lru_counter, 0.U, 1.U)
+        w_way := lru_way
+    
+    // 更新BTB条目
+    //000 非分支指令
+    //001 条件分支 需要预测taken,target
+    //010 jal 函数调用 需要预测target
+    //100 jalr 函数返回 需要预测target
+    when(io.update.require) {
+        //todo 非分支指令可以在传进来前就确定
+        when(io.update.br_type === 0.U ){
+            //非分支指令不要污染BTB
+            Rsb.io.push_en := false.B
+        }.elsewhen(io.update.br_type === 2.U) {
+            Rsb.io.push_en := true.B
+            Btb_bank(bank_idx_u)(w_way).Target := io.update.brTarget
+            Btb_bank(bank_idx_u)(w_way).tag := tag_u
+            Btb_bank(bank_idx_u)(w_way).Type := io.update.br_type
+            Btb_bank(bank_idx_u)(w_way).dirty := true.B
+        }.otherwise {
+            Rsb.io.push_en := false.B
+            // 对于其他类型的跳转，正常更新target
+            Btb_bank(bank_idx_u)(w_way).Target := io.update.brTarget
+            Btb_bank(bank_idx_u)(w_way).tag := tag_u
+            Btb_bank(bank_idx_u)(w_way).Type := io.update.br_type
+            Btb_bank(bank_idx_u)(w_way).dirty := true.B
+        }
+    }.otherwise {
+        Rsb.io.push_en := false.B
+    }
+
+    Rsb.io.in_data := io.update.update_pc + 4.U
+    }
+
+    // ================= 计数器优化实现 ================= //
     // Stage1寄存输入信号，消除毛刺，按脉冲只记一次
+    //todo 计数分支的信号错误，应当根据Pc类型进行计数
     val fire0_r = RegNext(io.in_0.bp_fire, 0.B)
     val fire1_r = RegNext(io.in_1.bp_fire, 0.B)
     val hit0_r  = RegNext(hit_0 && fire0_r, false.B)
@@ -227,88 +315,6 @@ class My_Btb extends Module with BP_Utail{
     //         printf(p"Btb_bank($bank_idx_0)($i).tag = ${Btb_bank(bank_idx_0)(i).tag}, dirty = ${Btb_bank(bank_idx_0)(i).dirty}\n")
     //     }
     // }
-
-    //返回第一个true的值对应的索引
-    val hit_way0 = PriorityEncoder(hits_0)
-    val hit_way1 = PriorityEncoder(hits_1)
-
-    val target_0 = Mux1H(hits_0, rTargets_0)
-    val target_1 = Mux1H(hits_1, rTargets_1)
-    val brType_0 = Mux1H(hits_0, rTypes_0)
-    val brType_1 = Mux1H(hits_1, rTypes_1)
-    
-    val stack = Module(new Stack())
-    
-    val is_jalr_0 = hit_0 && (brType_0 === 3.U)
-    val is_jalr_1 = hit_1 && (brType_1 === 3.U)
-    val is_jalr = is_jalr_0 || is_jalr_1 
-    
-    stack.io.pop_en_0 := is_jalr_0
-    stack.io.pop_en_1 := is_jalr_1
-
-    val jalr_en_0 = stack.io.out_en_0
-    val jalr_en_1 = stack.io.out_en_1
-    val jalr_Target_0 = stack.io.out_data_0
-    val jalr_Target_1 = stack.io.out_data_1
-
-    io.out_0.brTarget := Mux(is_jalr_0 && jalr_en_0, jalr_Target_0, target_0)
-    io.out_1.brTarget := Mux(is_jalr_1 && jalr_en_1, jalr_Target_1, target_1)
-
-    io.out_0.brType := brType_0
-    io.out_1.brType := brType_1
-
-    //数据有效取决于是否命中
-    io.out_0.valid := hit_0 || jalr_en_0
-    io.out_1.valid := hit_1 || jalr_en_1
-
-    // 更新策略
-    val rEntry_u = Wire(Vec(Btb_ways,new Btb_entry))     
-    val bank_idx_u = Wire(UInt(log2Ceil(Btb_sets).W))
-    val tag_u = Wire(UInt(tagsize.W))
-    val hits_u = VecInit((0 until Btb_ways).map(i => (rEntry_u(i).tag === tag_u)
-                                            && rEntry_u(i).dirty))
-    val lfsr = LFSR(2, io.update.require) // 修正位宽
-
-    bank_idx_u := get_idx(io.update.update_pc,32,idx_len)
-    rEntry_u := Btb_bank(bank_idx_u) 
-    tag_u := seg(io.update.update_pc,2,tagsize)
-
-    val w_way = Reg(UInt(1.W))
-    when(hits_u.reduce(_ || _)) {
-        // 如果命中，更新对应的way
-        w_way := Mux(hits_u(0), 0.U, 1.U)
-    }.elsewhen(!rEntry_u(0).dirty) {
-        // 优先使用空的slot
-        w_way := 0.U
-    }.elsewhen(!rEntry_u(1).dirty) {
-        w_way := 1.U
-    }.otherwise {
-        // 使用LRU策略替换最久未使用的
-        val lru_way = Mux(rEntry_u(0).lru_counter < rEntry_u(1).lru_counter, 0.U, 1.U)
-        w_way := lru_way
-    
-    // 更新BTB条目
-    when(io.update.require) {
-        when(io.update.br_type === 2.U) {
-            stack.io.push_en := true.B
-            // 对于jal指令，更新tag而不是target
-            Btb_bank(bank_idx_u)(w_way).tag := tag_u
-            Btb_bank(bank_idx_u)(w_way).Type := io.update.br_type
-            Btb_bank(bank_idx_u)(w_way).dirty := true.B
-        }.otherwise {
-            stack.io.push_en := false.B
-            // 对于其他类型的跳转，正常更新target
-            Btb_bank(bank_idx_u)(w_way).Target := io.update.brTarget
-            Btb_bank(bank_idx_u)(w_way).tag := tag_u
-            Btb_bank(bank_idx_u)(w_way).Type := io.update.br_type
-            Btb_bank(bank_idx_u)(w_way).dirty := true.B
-        }
-    }.otherwise {
-        stack.io.push_en := false.B
-    }
-
-    stack.io.in_data := io.update.update_pc + 4.U
-    }
 
 }
 
@@ -362,7 +368,6 @@ class My_Btb extends Module with BP_Utail{
         val bhr_0 = bhtBank(bhtBank_idx_0).bhr
         val bhr_1 = bhtBank(bhtBank_idx_1).bhr
 
-        // 优化8: 改进的PHT索引计算，混合更多位信息
         val pc_hash_0 = get_idx(io.pc_in0, 32, PHTLEN) & (nPHT-1).U
         val pc_hash_1 = get_idx(io.pc_in1, 32, PHTLEN) & (nPHT-1).U
         
@@ -415,6 +420,8 @@ class Stack extends Module{
         val out_data_0 = Output(UInt(32.W))
         val out_data_1 = Output(UInt(32.W))
     })
+    //输入:压栈信号及其数据；出栈信号
+    //输出:出栈数据及其是否有效  //*有效位是为了在取不出来的情况下给出信号
     
     val ptr = RegInit(0.U(ADDR_WIDTH.W))
     val stack_bank = RegInit(VecInit(Seq.fill(STACK_SIZE)(0.U(32.W))))

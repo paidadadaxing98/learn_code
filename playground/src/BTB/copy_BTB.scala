@@ -122,11 +122,25 @@ class My_Btb extends Module with BP_Utail{
     val Btb_bank = RegInit(VecInit(Seq.fill(Btb_sets)
                                     (VecInit(Seq.fill(Btb_ways)
                                         (0.U.asTypeOf(new Btb_entry))))))
+        // 加入预测器
+    val predictor = Module(new my_Predictor)
+    predictor.io.pc_in0 := io.in_0.req_pc
+    predictor.io.pc_in1 := io.in_1.req_pc
+    
+    //读取数据
+    io.out_0.brTaken := predictor.io.Taken_0
+    io.out_1.brTaken := predictor.io.Taken_1
+    
+    //更新的接口
+    predictor.io.update.valid := io.update.require
+    predictor.io.update.brTaken := io.update.brTaken
+    predictor.io.update.Pre_pc := io.update.update_pc
+    predictor.io.update.brType := io.update.br_type
 
     val bank_idx_0 = Wire(UInt(log2Ceil(Btb_sets).W))
     val bank_idx_1 = Wire(UInt(log2Ceil(Btb_sets).W))
-    bank_idx_0 := get_idx(io.in_0.req_pc, 32, idx_len) & (Btb_sets - 1).U
-    bank_idx_1 := get_idx(io.in_1.req_pc, 32, idx_len) & (Btb_sets - 1).U
+    bank_idx_0 := (get_idx(io.in_0.req_pc, 32, idx_len) & (Btb_sets - 1).U ) 
+    bank_idx_1 := (get_idx(io.in_1.req_pc, 32, idx_len) & (Btb_sets - 1).U ) 
 
     val tag_0 = Wire(UInt(tagsize.W))
     val tag_1 = Wire(UInt(tagsize.W))
@@ -154,21 +168,29 @@ class My_Btb extends Module with BP_Utail{
     val hit_0 = hits_0.reduce(_ || _)
     val hit_1 = hits_1.reduce(_ || _)
 
-    // 修复计数器 - 取消注释并修正依赖关系
-    val counter_all = RegInit(0.U(32.W))
-    val counter_hit = RegInit(0.U(32.W))
-    val add_all = io.in_0.bp_fire.asUInt + io.in_1.bp_fire.asUInt
-    val add_hit = hit_0.asUInt + hit_1.asUInt
-    counter_all := counter_all + add_all
-    counter_hit := counter_hit + add_hit
+  // ================= 计数器优化实现 =================
+  // Stage1寄存输入信号，消除毛刺，按脉冲只记一次
+  val fire0_r = RegNext(io.in_0.bp_fire, 0.B)
+  val fire1_r = RegNext(io.in_1.bp_fire, 0.B)
+  val hit0_r  = RegNext(hit_0 && fire0_r, false.B)
+  val hit1_r  = RegNext(hit_1 && fire1_r, false.B)
 
-    // 输出计数器值
-    io.counter_all := counter_all
-    io.counter_hit := counter_hit
+  val counter_all = RegInit(0.U(32.W))
+  val counter_hit = RegInit(0.U(32.W))
+  when(reset.asBool) {
+    counter_all := 0.U
+    counter_hit := 0.U
+  }.otherwise {
+    counter_all := counter_all + fire0_r.asUInt + fire1_r.asUInt
+    counter_hit := counter_hit + hit0_r.asUInt + hit1_r.asUInt
+  }
+  io.counter_all := counter_all
+  io.counter_hit := counter_hit
+
 
     // 调试信息 - 添加条件打印，避免每个周期都打印
     when(io.in_0.bp_fire || io.in_1.bp_fire) {
-        printf(p"tag_0 = ${tag_0}, io.in_0.bp_fire = ${io.in_0.bp_fire}\n")
+        printf(p"tag_0 = ${tag_0}, io.in_0.bp_fire = ${io.in_0.bp_fire},io.in_1.bp_fire = ${io.in_1.bp_fire}\n")
         printf(p"bank_idx_0 = ${bank_idx_0}\n")
         printf(p"hit_0 = ${hit_0}, hit_1 = ${hit_1}\n")
         printf(p"counter_all = ${counter_all}, counter_hit = ${counter_hit}\n")
@@ -255,20 +277,7 @@ class My_Btb extends Module with BP_Utail{
 
     stack.io.in_data := io.update.update_pc + 4.U
 
-    // 加入预测器
-    val predictor = Module(new my_Predictor)
-    predictor.io.pc_in0 := io.in_0.req_pc
-    predictor.io.pc_in1 := io.in_1.req_pc
-    
-    //读取数据
-    io.out_0.brTaken := predictor.io.Taken_0
-    io.out_1.brTaken := predictor.io.Taken_1
-    
-    //更新的接口
-    predictor.io.update.valid := io.update.require
-    predictor.io.update.brTaken := io.update.brTaken
-    predictor.io.update.Pre_pc := io.update.update_pc
-    predictor.io.update.brType := io.update.br_type
+
 }
 
 // 预测器定义
@@ -304,6 +313,8 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
         val update = Input(new Pre_Entry)
         val Taken_0 = Output(Bool())
         val Taken_1 = Output(Bool())
+        // val bhr_0 = Output(UInt(BHRLEN.W))
+        // val bhr_1 = Output(UInt(BHRLEN.W))
     })
 
     val bhtBank = RegInit(VecInit(Seq.fill(nBHT)
@@ -321,6 +332,9 @@ class my_Predictor extends Module with Predictor_Queue with BP_Utail{
 
     val bhr_0 = bhtBank(bhtBank_idx_0).bhr
     val bhr_1 = bhtBank(bhtBank_idx_1).bhr
+
+    // io.bhr_0 := bhr_0
+    // io.bhr_1 := bhr_1
 
     phtBank_idx_0 := get_idx(io.pc_in0,32,PHTLEN) ^ bhr_0
     phtBank_idx_1 := get_idx(io.pc_in1,32,PHTLEN) ^ bhr_1

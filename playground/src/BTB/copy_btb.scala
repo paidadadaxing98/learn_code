@@ -1,14 +1,12 @@
 import chisel3._
 import chisel3.util._
-import chisel3.util.random.LFSR
+
 
 trait  Btb_Queue {
     val Btb_entrys = 512
-    val Btb_sets = Btb_entrys / Btb_ways
     val Btb_ways = 2
-
+    val Btb_sets = Btb_entrys / Btb_ways
     val tagsize = 20
-    val brTypeNum = 3
     val idx_len = 8
 }
 
@@ -210,6 +208,8 @@ class My_Btb extends Module with BP_Utail{
     
     Rsb.io.pop_en_0 := is_jalr_0
     Rsb.io.pop_en_1 := is_jalr_1
+    Rsb.io.push_en := false.B    // 先初始化为false
+    Rsb.io.in_data := 0.U        // 先初始化为0
 
     val jalr_en_0 = Rsb.io.out_en_0
     val jalr_en_1 = Rsb.io.out_en_1
@@ -233,7 +233,7 @@ class My_Btb extends Module with BP_Utail{
     val tag_u = Wire(UInt(tagsize.W))
     val hits_u = VecInit((0 until Btb_ways).map(i => (wSet_u(i).tag === tag_u)
                                             && wSet_u(i).dirty))
-    val lfsr = LFSR(2, io.update.require) // 修正位宽
+
 
     bank_idx_u := get_idx(io.update.update_pc,32,idx_len) & (Btb_sets - 1).U //防止溢出
     wSet_u := Btb_bank(bank_idx_u) 
@@ -256,8 +256,8 @@ class My_Btb extends Module with BP_Utail{
     // 更新BTB条目
     //000 非分支指令
     //001 条件分支 需要预测taken,target
-    //010 jal 函数调用 需要预测target
-    //100 jalr 函数返回 需要预测target
+    //010 BL jirl 函数调用 需要预测target
+    //100 B 函数返回 需要预测target
     when(io.update.require) {
         //todo 非分支指令可以在传进来前就确定
         when(io.update.br_type === 0.U ){
@@ -287,8 +287,8 @@ class My_Btb extends Module with BP_Utail{
     // ================= 计数器优化实现 ================= //
     // Stage1寄存输入信号，消除毛刺，按脉冲只记一次
     //todo 计数分支的信号错误，应当根据Pc类型进行计数
-    val fire0_r = RegNext(io.in_0.bp_fire, 0.B)
-    val fire1_r = RegNext(io.in_1.bp_fire, 0.B)
+    val fire0_r = RegNext(brType_0 =/= 0.U, 0.B)
+    val fire1_r = RegNext(brType_1 =/= 0.U, 0.B)
     val hit0_r  = RegNext(hit_0 && fire0_r, false.B)
     val hit1_r  = RegNext(hit_1 && fire1_r, false.B)
 
@@ -323,7 +323,7 @@ class My_Btb extends Module with BP_Utail{
         val PHTLEN = log2Ceil(nPHT)
         val nBHT = 512  // 增加BHT大小
         val BHTLEN = log2Ceil(nBHT)
-        val BHRLEN = 10 // 增加历史长度到10位，提高预测精度
+        val BHRLEN = 8 
     }    
 
     class Pre_Entry extends Bundle {
@@ -371,8 +371,8 @@ class My_Btb extends Module with BP_Utail{
         val pc_hash_0 = get_idx(io.pc_in0, 32, PHTLEN) & (nPHT-1).U
         val pc_hash_1 = get_idx(io.pc_in1, 32, PHTLEN) & (nPHT-1).U
         
-        phtBank_idx_0 := pc_hash_0 ^ bhr_0(PHTLEN-1, 0)
-        phtBank_idx_1 := pc_hash_1 ^ bhr_1(PHTLEN-1, 0)
+        phtBank_idx_0 := pc_hash_0 ^ bhr_0(PHTLEN-2, 0)
+        phtBank_idx_1 := pc_hash_1 ^ bhr_1(PHTLEN-2, 0)
 
         io.Taken_0 := phtBank(phtBank_idx_0).ctr(1) && phtBank(phtBank_idx_0).valid
         io.Taken_1 := phtBank(phtBank_idx_1).ctr(1) && phtBank(phtBank_idx_1).valid
@@ -386,7 +386,7 @@ class My_Btb extends Module with BP_Utail{
         bhtBank_idx_u := get_idx(io.update.Pre_pc,32,BHTLEN) & (nBHT-1).U
         bhr_u := bhtBank(bhtBank_idx_u).bhr
         val pc_hash_u = get_idx(io.update.Pre_pc, 32, PHTLEN) & (nPHT-1).U
-        phtBank_idx_u := pc_hash_u ^ bhr_u(PHTLEN-1, 0)
+        phtBank_idx_u := pc_hash_u ^ bhr_u(PHTLEN-2, 0)
         ctr_u := phtBank(phtBank_idx_u).ctr
 
         when(io.update.valid){

@@ -90,6 +90,9 @@ class IDU extends Module{
 //-----------------------------Jump跳转-----------------------------
   val allow_taken=Wire(Vec(2,Bool()))
   val isBrJmp=Wire(Vec(2,Bool()))
+  val isBrJirl=Wire(Vec(2,Bool()))
+  val isBr_B=Wire(Vec(2,Bool()))
+  val isBr_Bl=Wire(Vec(2,Bool()))
   val isBrCond=Wire(Vec(2,Bool()))
   val j_taken=Wire(Vec(2,Bool()))
   val j_target=Wire(Vec(2,UInt(ADDR_WIDTH.W)))
@@ -97,7 +100,10 @@ class IDU extends Module{
   allow_taken(1):= InstFIFO.io.fifo_length>=2.U&&id.to_ih.allowin
 //在issue可能会发生跳转s
   for(i<-0 until 2){
-    isBrJmp(i):=inst_queue_bits(i).inst(31,27)==="b01010".U(5.W)
+    isBrJirl(i):=inst_queue_bits(i).inst(31,26)==="b010011".U(6.W)
+    isBr_B(i):=inst_queue_bits(i).inst(31,26)==="b010100".U(6.W)
+    isBr_Bl(i):=inst_queue_bits(i).inst(31,26)==="b010101".U(6.W)
+    isBrJmp(i):=isBrJirl(i) || isBr_B(i) || isBr_Bl(i)
     isBrCond(i):=Decode(i).inst_op===SDEF(OP_BRU)
     j_taken(i):=isBrJmp(i)&&allow_taken(i)
     j_target(i):=decode_bits(i).pc+Sext(Cat(inst_queue_bits(i).inst(9,0),inst_queue_bits(i).inst(25,10),0.U(2.W)), 32)
@@ -126,7 +132,11 @@ class IDU extends Module{
     predictorUpdate(i).pc := decode_bits(i).pc
     predictorUpdate(i).brTaken := j_taken(i)
     predictorUpdate(i).entry.brTarget := j_target(i)
-    predictorUpdate(i).entry.brType   := Mux(isBrJmp(i), 2.U, 0.U)
+    predictorUpdate(i).entry.brType   := Mux(isBrCond(i),1.U, 
+                                            Mux(isBr_Bl(i)||isBrJirl(i),2.U,
+                                                Mux(isBr_B(i),4.U,0.U)))
+                                              
+                                                
   }
 
 /*

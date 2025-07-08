@@ -219,6 +219,7 @@ class IHU extends Module{
     issue_bits(i).diffInstr.timer64value:=ih.from_csr.timer_out
   }
 
+//* 跳转赋值 ih接收 */
 //NOTE:perf
   for(i<-0 until 2){
     issue_bits(i).perf_sys_quit:=decode_bits(i).perf_sys_quit
@@ -238,6 +239,7 @@ class IHU extends Module{
   for(i<-0 until 2){
     issue_bits(i).isBrJmp :=decode_bits(i).isBrJmp
     issue_bits(i).isBrCond:=decode_bits(i).isBrCond
+    issue_bits(i).isBrJirl:=decode_bits(i).isBrJirl
     issue_bits(i).excp_en:=decode_bits(i).excp_en
     issue_bits(i).excp_type:=decode_bits(i).excp_type
     issue_bits(i).cnt_op :=decode_bits(i).cnt_op

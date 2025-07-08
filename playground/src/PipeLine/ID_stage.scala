@@ -99,12 +99,14 @@ class IDU extends Module{
   allow_taken(0):= InstFIFO.io.fifo_length>=1.U&&id.to_ih.allowin
   allow_taken(1):= InstFIFO.io.fifo_length>=2.U&&id.to_ih.allowin
 //在issue可能会发生跳转s
+//todo 跳转目标有问题
+//todo B,BL的目标在id阶段进行计算，jirl和cond在ex阶段计算
   for(i<-0 until 2){
     isBrJirl(i):=inst_queue_bits(i).inst(31,26)==="b010011".U(6.W)
     isBr_B(i):=inst_queue_bits(i).inst(31,26)==="b010100".U(6.W)
     isBr_Bl(i):=inst_queue_bits(i).inst(31,26)==="b010101".U(6.W)
-    isBrJmp(i):=isBrJirl(i) || isBr_B(i) || isBr_Bl(i)
-    isBrCond(i):=Decode(i).inst_op===SDEF(OP_BRU)
+    isBrJmp(i):= inst_queue_bits(i).inst(31,27)==="b01010".U(5.W) //B BL
+    isBrCond(i):=Decode(i).inst_op===SDEF(OP_BRU) //B类 jirl
     j_taken(i):=isBrJmp(i)&&allow_taken(i)
     j_target(i):=decode_bits(i).pc+Sext(Cat(inst_queue_bits(i).inst(9,0),inst_queue_bits(i).inst(25,10),0.U(2.W)), 32)
   }
@@ -127,14 +129,16 @@ class IDU extends Module{
 
   val predictorUpdate = Wire(Vec(FetchWidth, new PredictorUpdate()))
     predictorUpdate := VecInit(Seq.fill(FetchWidth)(0.U.asTypeOf(new PredictorUpdate())))
+    dontTouch(predictorUpdate)
+    
   for( i <- 0 until FetchWidth ){
     predictorUpdate(i).valid := isBrJmp(i)  //if inst is valid, need update
     predictorUpdate(i).pc := decode_bits(i).pc
     predictorUpdate(i).brTaken := j_taken(i)
     predictorUpdate(i).entry.brTarget := j_target(i)
-    predictorUpdate(i).entry.brType   := Mux(isBrCond(i),1.U, 
-                                            Mux(isBr_Bl(i)||isBrJirl(i),2.U,
-                                                Mux(isBr_B(i),4.U,0.U)))
+    predictorUpdate(i).entry.brType   := Mux(isBr_Bl(i),2.U,
+                                                Mux(isBr_B(i),4.U,0.U))
+                                            
                                               
                                                 
   }
@@ -180,6 +184,7 @@ not taken   taken                   snpc   add 4 or 8?
   for(i<-0 until 2){
     decode_bits(i).isBrJmp :=isBrJmp(i)
     decode_bits(i).isBrCond:=isBrCond(i)
+    decode_bits(i).isBrJirl:=isBrJirl(i)
     decode_bits(i).pred:=pred(i)
     decode_bits(i).brjump_result:=predictorUpdate(i)
   }
@@ -190,6 +195,7 @@ not taken   taken                   snpc   add 4 or 8?
   val bp_isJmp_counter = RegInit(0.U(ADDR_WIDTH.W))
   dontTouch(bp_isJmp_counter)
   dontTouch(bp_wrong_counter)
+  //todo 计数器逻辑有问题
   if(GenCtrl.PERF_CNT){
     when(isBrJmp(0) && id.to_ih.dualmask(0)){
       bp_isJmp_counter := bp_isJmp_counter + 1.U
@@ -214,6 +220,7 @@ class decode_data_bundle extends Bundle{
   val brjump_result=new PredictorUpdate()
   val isBrJmp =Bool()
   val isBrCond=Bool()
+  val isBrJirl=Bool()
   val csr_op  =UInt(Control.CSR_XXXX.length.W)
   val csr_wen =Bool()
   val csr_addr=UInt(14.W)

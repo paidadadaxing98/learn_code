@@ -322,7 +322,7 @@ class SimTop extends Module {
 //更新接口
   btb.io.update.require := lsu.ls.ubtb_update.valid
   btb.io.update.update_pc := lsu.ls.ubtb_update.pc
-  btb.io.update.br_type := lsu.ls.ubtb_update.brType //todo 流水线上没有这个信号,注释掉了
+  btb.io.update.br_type := lsu.ls.ubtb_update.entry.brType //todo 流水线上没有这个信号,注释掉了
   btb.io.update.brTaken := lsu.ls.ubtb_update.brTaken
   btb.io.update.brTarget := lsu.ls.ubtb_update.entry.brTarget
   println(btb.io)

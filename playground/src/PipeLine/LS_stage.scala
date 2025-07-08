@@ -127,7 +127,8 @@ class LSU extends Module {
     ((ls.in.bits(0).isBrJmp  && ls_valid(0)) -> ls.in.bits(0).brjump_result),
     ((ls.in.bits(0).isBrCond && ls_valid(0) && ls.in.bits(0).brcond_result.brTaken ) -> ls.in.bits(0).brcond_result),
     ((ls.in.bits(1).isBrJmp  && ls_valid(1)) -> ls.in.bits(1).brjump_result),
-    // ((ls.in.bits(1).isBrCond && ls_valid(1) && ls.in.bits(0).brcond_result.brTaken ) -> ls.in.bits(1).brcond_result)
+    //?这里以前是注释掉的，但是我觉得不应该注释掉
+    ((ls.in.bits(1).isBrCond && ls_valid(1) && ls.in.bits(0).brcond_result.brTaken ) -> ls.in.bits(1).brcond_result)
   ))
 
   ls.ubtb_update := update_pred

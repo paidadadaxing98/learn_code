@@ -51,23 +51,18 @@ trait BP_Utail extends  Btb_Queue {
 
     //XOR压缩索引pc -> len位
     def get_idx(pc: UInt, pc_len: Int, len: Int): UInt = {
-        // 去除对齐位，使用PC[31:2]参与计算
         val effective_pc = pc >> 2
-        val effective_pc_len = pc_len - 2
         
-        val nChunks = (effective_pc_len + len - 1) / len
-        val seq_Chunks = (0 until nChunks).map { i =>
-            val high = math.min(effective_pc_len - 1, (i + 1) * len - 1)
-            val low  = i * len
-            effective_pc(high, low)
-        }
+        val seg1 = effective_pc(len-1, 0)
+        val seg2_start = len
+        val seg2_end = math.min(2*len-1, pc_len-3)
+        val seg2 = if(seg2_end >= seg2_start) effective_pc(seg2_end, seg2_start) else 0.U
         
-        // 额外的高位混合，减少局部密集冲突
-        val folded_result = Seq_XOR(seq_Chunks)
-        val high_bits = effective_pc(effective_pc_len - 1, effective_pc_len - len)
+        val seg3_start = 2*len  
+        val seg3_end = pc_len-3
+        val seg3 = if(seg3_end >= seg3_start) effective_pc(seg3_end, seg3_start) else 0.U
         
-        // 最终哈希：折叠结果 XOR 高位
-        folded_result ^ high_bits
+        seg1 ^ seg2(len-1, 0) ^ seg3(len-1, 0)
     }
 }
 
@@ -211,6 +206,10 @@ class My_Btb extends Module with BP_Utail{
     Rsb.io.pop_en_1 := is_B_1
     Rsb.io.push_en := false.B    // 先初始化为false
     Rsb.io.in_data := 0.U        // 先初始化为0
+    Rsb.io.pc_0 := io.in_0.req_pc
+    Rsb.io.valid_0 := io.in_0.bp_fire
+    Rsb.io.pc_1 := io.in_1.req_pc
+    Rsb.io.valid_1 := io.in_1.bp_fire
 
     val B_en_0 = Rsb.io.out_en_0
     val B_en_1 = Rsb.io.out_en_1
@@ -288,10 +287,15 @@ class My_Btb extends Module with BP_Utail{
     // ================= 计数器优化实现 ================= //
     // Stage1寄存输入信号，消除毛刺，按脉冲只记一次
     //todo 计数分支的信号错误，应当根据Pc类型进行计数
-    val fire0_r = RegNext(brType_0 =/= 0.U, 0.B)
-    val fire1_r = RegNext(brType_1 =/= 0.U, 0.B)
-    val hit0_r  = RegNext(hit_0 && brType_0 =/= 0.U, false.B)
-    val hit1_r  = RegNext(hit_1 && brType_0 =/= 0.U, false.B)
+    val fire0_r = Wire(Bool())
+    val fire1_r = Wire(Bool())
+    val hit0_r  = Wire(Bool())
+    val hit1_r  = Wire(Bool())
+
+    fire0_r := brType_0 =/= 0.U
+    fire1_r := brType_1 =/= 0.U
+    hit0_r := hit_0 && (brType_0 =/= 0.U)
+    hit1_r := hit_1 && (brType_1 =/= 0.U)
 
     val counter_all = RegInit(0.U(32.W))
     val counter_hit = RegInit(0.U(32.W))
@@ -427,6 +431,10 @@ class My_Btb extends Module with BP_Utail{
         val ADDR_WIDTH = log2Ceil(STACK_SIZE)
         
         val io = IO(new Bundle{
+            val pc_0 = Input(UInt(32.W))          
+            val valid_0 = Input(Bool())            
+            val pc_1 = Input(UInt(32.W))
+            val valid_1 = Input(Bool())
             val push_en = Input(Bool())
             val pop_en_0 = Input(Bool())
             val pop_en_1 = Input(Bool())
@@ -436,59 +444,89 @@ class My_Btb extends Module with BP_Utail{
             val out_data_0 = Output(UInt(32.W))
             val out_data_1 = Output(UInt(32.W))
         })
-        //输入:压栈信号及其数据；出栈信号
+        //输入:压栈信号及其数据；出栈信号；pc_0和有效信号
         //输出:出栈数据及其是否有效  //*有效位是为了在取不出来的情况下给出信号
         
         val ptr = RegInit(0.U(ADDR_WIDTH.W))
         val stack_bank = RegInit(VecInit(Seq.fill(STACK_SIZE)(0.U(32.W))))
+        dontTouch(stack_bank)
         
-        // 改进的栈状态检测
+        //新增：PC去重机制
+        val last_pc_0 = RegInit(0.U(32.W))
+        val last_pc_1 = RegInit(0.U(32.W))
+        val last_push_data = RegInit(0.U(32.W))
+        val pc_0_changed = Wire(Bool())
+        val pc_1_changed = Wire(Bool())
+        val data_changed = Wire(Bool())
+        val real_valid_0 = Wire(Bool())
+        val real_valid_1 = Wire(Bool())
+        // 检测PC和数据是否真正变化
+        pc_0_changed := (io.pc_0 =/= last_pc_0) 
+        pc_1_changed := (io.pc_1 =/= last_pc_1) 
+        data_changed := io.in_data =/= last_push_data
+        real_valid_0 := io.valid_0 && pc_0_changed
+        real_valid_1 := io.valid_1 && pc_1_changed
+        
+        // 更新历史记录
+        when(real_valid_0) {
+            last_pc_0 := io.pc_0
+        }
+        when(real_valid_1) {
+            last_pc_1 := io.pc_1
+        }
+        when(data_changed){
+            last_push_data := io.in_data
+        }
+
+        //只在PC变化时执行真正的push/pop操作
+        val real_push_en = Wire(Bool())
+        val real_pop_en_0 = Wire(Bool())
+        val real_pop_en_1 = Wire(Bool())
+        real_push_en := io.push_en && data_changed
+        real_pop_en_0 := io.pop_en_0 && real_valid_0
+        real_pop_en_1 := io.pop_en_1 && real_valid_1
+        
+        // 状态检测
         val empty = ptr === 0.U
-        val full = ptr === (STACK_SIZE-1).U
+        val full = ptr === STACK_SIZE.U  
         val has_one = ptr === 1.U
         val has_two_or_more = ptr >= 2.U
         
-        // 操作逻辑
-        val pop_count = Wire(UInt(2.W))
-        val push_count = Wire(UInt(1.W))
-        
-        pop_count := io.pop_en_0.asUInt + io.pop_en_1.asUInt
-        push_count := io.push_en.asUInt
-        
-        // 计算新的指针位置
-        val new_ptr = Wire(UInt(ADDR_WIDTH.W))
-        val net_change = push_count.asSInt - pop_count.asSInt
-        
-        when(net_change > 0.S && !full) {
-            new_ptr := ptr + net_change.asUInt
-        }.elsewhen(net_change < 0.S && ptr >= (-net_change).asUInt) {
-            new_ptr := ptr - (-net_change).asUInt
+        //使用去重后的信号更新指针
+        when(reset.asBool) {
+            ptr := 0.U
         }.otherwise {
-            new_ptr := ptr
+            // 先处理push
+            when(real_push_en && ptr < STACK_SIZE.U) {
+                stack_bank(ptr) := io.in_data
+                ptr := ptr + 1.U
+            }
+            
+            // 再处理pop（可以同时进行）
+            when(real_pop_en_0 && ptr > 0.U) {
+                stack_bank(ptr) := 0.U
+                ptr := ptr - 1.U
+                when(real_pop_en_1  && ptr > 1.U) {
+                    stack_bank(ptr - 1.U) := 0.U
+                    ptr := ptr - 2.U
+                }            
+            }.elsewhen(real_pop_en_1 && ptr > 0.U) {
+                stack_bank(ptr) := 0.U
+                ptr := ptr - 1.U
+            }
         }
         
-        // 更新指针和栈内容
-        when(io.push_en && !full) {
-            stack_bank(ptr) := io.in_data
-        }
+        //输出逻辑使用去重后的信号
+        val can_pop_0 = !empty && real_pop_en_0
+        val can_pop_1 = real_pop_en_1 && Mux(real_pop_en_0, has_two_or_more, !empty)
         
-        ptr := new_ptr
-        
-        // 改进的输出逻辑
-        val can_pop_0 = !empty && io.pop_en_0
-        val can_pop_1 = io.pop_en_1 && Mux(io.pop_en_0, has_two_or_more, !empty)
-        
-        // 输出数据
         when(can_pop_0 && can_pop_1) {
-            // 同时弹出两个
             io.out_data_0 := stack_bank(ptr - 1.U)
             io.out_data_1 := stack_bank(ptr - 2.U)
         }.elsewhen(can_pop_0) {
-            // 只弹出第一个
             io.out_data_0 := stack_bank(ptr - 1.U)
             io.out_data_1 := 0.U
         }.elsewhen(can_pop_1) {
-            // 只弹出第二个
             io.out_data_0 := 0.U
             io.out_data_1 := stack_bank(ptr - 1.U)
         }.otherwise {
@@ -498,6 +536,7 @@ class My_Btb extends Module with BP_Utail{
         
         io.out_en_0 := can_pop_0
         io.out_en_1 := can_pop_1
+    
         
         // 调试信息
         // when(io.push_en || io.pop_en_0 || io.pop_en_1) {

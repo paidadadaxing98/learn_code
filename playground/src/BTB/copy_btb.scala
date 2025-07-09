@@ -181,7 +181,7 @@ class My_Btb extends Module with BP_Utail{
         }
     }
 
-    //------------------针对不同类型的跳转指令选用BTB或者RSB----------------//
+    //------------------针对不同类型的跳转指令选用BTB或者RAS----------------//
     //返回第一个true的值对应的索引
     val hit_way0 = PriorityEncoder(hits_0)
     val hit_way1 = PriorityEncoder(hits_1)
@@ -195,26 +195,26 @@ class My_Btb extends Module with BP_Utail{
     val target_1 = Mux1H(hits_1, rTargets_1)
     val brType_0 = Mux1H(hits_0, rTypes_0)
     val brType_1 = Mux1H(hits_1, rTypes_1)
-    //-----------------------接入RSB--------------------------//
-    val Rsb = Module(new Stack())
+    //-----------------------接入RAS--------------------------//
+    val Ras = Module(new Stack())
     
     val is_B_0 = hit_0 && (brType_0 === 4.U)
     val is_B_1 = hit_1 && (brType_1 === 4.U)
     val is_B = is_B_0 || is_B_1 
     
-    Rsb.io.pop_en_0 := is_B_0
-    Rsb.io.pop_en_1 := is_B_1
-    Rsb.io.push_en := false.B    // 先初始化为false
-    Rsb.io.in_data := 0.U        // 先初始化为0
-    Rsb.io.pc_0 := io.in_0.req_pc
-    Rsb.io.valid_0 := io.in_0.bp_fire
-    Rsb.io.pc_1 := io.in_1.req_pc
-    Rsb.io.valid_1 := io.in_1.bp_fire
+    Ras.io.pop_en_0 := is_B_0
+    Ras.io.pop_en_1 := is_B_1
+    Ras.io.push_en := false.B    // 先初始化为false
+    Ras.io.in_data := 0.U        // 先初始化为0
+    Ras.io.pc_0 := io.in_0.req_pc
+    Ras.io.valid_0 := io.in_0.bp_fire
+    Ras.io.pc_1 := io.in_1.req_pc
+    Ras.io.valid_1 := io.in_1.bp_fire
 
-    val B_en_0 = Rsb.io.out_en_0
-    val B_en_1 = Rsb.io.out_en_1
-    val B_Target_0 = Rsb.io.out_data_0
-    val B_Target_1 = Rsb.io.out_data_1
+    val B_en_0 = Ras.io.out_en_0
+    val B_en_1 = Ras.io.out_en_1
+    val B_Target_0 = Ras.io.out_data_0
+    val B_Target_1 = Ras.io.out_data_1
 
     io.out_0.brTarget := Mux(is_B_0 && B_en_0, B_Target_0, target_0)
     io.out_1.brTarget := Mux(is_B_1 && B_en_1, B_Target_1, target_1)
@@ -260,19 +260,19 @@ class My_Btb extends Module with BP_Utail{
     val brTarget_r = RegNext(io.update.brTarget, 0.U)
     val update_pc_r = RegNext(io.update.update_pc, 0.U)
 
-    // RSB控制（当前周期就要控制，不能延迟）
+    // RAS控制（当前周期就要控制，不能延迟）
     when(io.update.require) {
         when(io.update.br_type === 0.U) {
-            Rsb.io.push_en := false.B
+            Ras.io.push_en := false.B
         }.elsewhen(io.update.br_type === 2.U) {
-            Rsb.io.push_en := true.B
+            Ras.io.push_en := true.B
         }.otherwise {
-            Rsb.io.push_en := false.B
+            Ras.io.push_en := false.B
         }
-        Rsb.io.in_data := io.update.update_pc + 4.U
+        Ras.io.in_data := io.update.update_pc + 4.U
     }.otherwise {
-        Rsb.io.push_en := false.B
-        Rsb.io.in_data := 0.U
+        Ras.io.push_en := false.B
+        Ras.io.in_data := 0.U
     }
 
     // 第三级：实际写入BTB（下一周期）

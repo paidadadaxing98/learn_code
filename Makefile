@@ -20,7 +20,7 @@ verilog:
 VIVADO_POJECT_IP_PATH?=null #TODO
 FUNC_TEST_PATH?=null
 PERF_TEST_PATH?=null
-SOC_PATH?=../IP/myCPU
+SOC_PATH?=/home/zy/chiplab/IP/myCPU
 func:
 	rm -rf ./vsrc/*
 	mill -i __.test.runMain TopMain --target-dir ./vsrc

@@ -12,7 +12,7 @@ class ImmGen extends Module {
   val Imm12= io.inst(21,10)
   val Imm14= io.inst(23,10)
   val Imm16= io.inst(25,10)
-  val Imm20= io.inst(25,5 )
+  val Imm20= io.inst(24,5 )
   val Imm26= Cat(io.inst(9,0),io.inst(25,10))
 
   val immMap=Map(

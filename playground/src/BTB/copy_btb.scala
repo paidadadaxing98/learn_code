@@ -117,13 +117,11 @@ class My_Btb extends Module with BP_Utail{
     predictor.io.pc_in0 := io.in_0.req_pc
     predictor.io.pc_in1 := io.in_1.req_pc
     
-    //读取数据
-    io.out_0.brTaken := predictor.io.Taken_0
-    io.out_1.brTaken := predictor.io.Taken_1
-    
+   
+
     //更新的接口
     //只有条件跳转需要预测taken
-    predictor.io.update.valid := io.update.require && (io.update.brTarget === 1.U)
+    predictor.io.update.valid := io.update.require && (io.update.br_type === 1.U)
     predictor.io.update.brTaken := io.update.brTaken
     predictor.io.update.Pre_pc := io.update.update_pc
     predictor.io.update.brType := io.update.br_type
@@ -191,17 +189,17 @@ class My_Btb extends Module with BP_Utail{
     val rTypes_0 = VecInit((0 until Btb_ways).map(i => rSet_0(i).Type))
     val rTypes_1 = VecInit((0 until Btb_ways).map(i => rSet_1(i).Type))
 
-    val target_0 = Mux1H(hits_0, rTargets_0)
-    val target_1 = Mux1H(hits_1, rTargets_1)
-    val brType_0 = Mux1H(hits_0, rTypes_0)
-    val brType_1 = Mux1H(hits_1, rTypes_1)
+    val target_0 = Mux(hit_0, Mux1H(hits_0, rTargets_0), 0.U)
+    val target_1 = Mux(hit_1, Mux1H(hits_1, rTargets_1), 0.U)
+    val brType_0 = Mux(hit_0, Mux1H(hits_0, rTypes_0), 0.U)
+    val brType_1 = Mux(hit_1, Mux1H(hits_1, rTypes_1), 0.U)
     //-----------------------接入RAS--------------------------//
     val Ras = Module(new Stack())
     
-    val is_B_0 = hit_0 && (brType_0 === 4.U)
-    val is_B_1 = hit_1 && (brType_1 === 4.U)
+    val is_B_0 = brType_0 === 4.U
+    val is_B_1 = brType_1 === 4.U
     val is_B = is_B_0 || is_B_1 
-    
+    val ras_data_valid = io.update.br_type === 2.U
     Ras.io.pop_en_0 := is_B_0
     Ras.io.pop_en_1 := is_B_1
     Ras.io.push_en := false.B    // 先初始化为false
@@ -210,22 +208,33 @@ class My_Btb extends Module with BP_Utail{
     Ras.io.valid_0 := io.in_0.bp_fire
     Ras.io.pc_1 := io.in_1.req_pc
     Ras.io.valid_1 := io.in_1.bp_fire
+    Ras.io.ras_data_valid := ras_data_valid
 
-    val B_en_0 = Ras.io.out_en_0
-    val B_en_1 = Ras.io.out_en_1
-    val B_Target_0 = Ras.io.out_data_0
-    val B_Target_1 = Ras.io.out_data_1
+    val Ras_en_0 = Ras.io.out_en_0
+    val Ras_en_1 = Ras.io.out_en_1
+    val Ras_Target_0 = Ras.io.out_data_0
+    val Ras_Target_1 = Ras.io.out_data_1
 
-    io.out_0.brTarget := Mux(is_B_0 && B_en_0, B_Target_0, target_0)
-    io.out_1.brTarget := Mux(is_B_1 && B_en_1, B_Target_1, target_1)
+    val brTarget_0 = Mux(is_B_0 && Ras_en_0, Ras_Target_0, target_0)
+    val brTarget_1 = Mux(is_B_1 && Ras_en_1, Ras_Target_1, target_1)
+    io.out_0.brTarget := brTarget_0
+    io.out_1.brTarget := brTarget_1
 
+    val always_taken_0 = (brType_0 === 2.U) || (brType_0 === 4.U)
+    val always_taken_1 = (brType_1 === 2.U) || (brType_1 === 4.U)
+    val always_notaken_0 = (brType_0 === 3.U)
+    val always_notaken_1 = (brType_1 === 3.U)
+
+    io.out_0.brTaken := Mux(always_notaken_0, false.B,
+                            Mux(always_taken_0, true.B, predictor.io.Taken_0))
+    io.out_1.brTaken := Mux(always_notaken_1, false.B,
+                            Mux(always_taken_1, true.B, predictor.io.Taken_1))
     io.out_0.brType := brType_0
     io.out_1.brType := brType_1
 
-    //数据有效取决于是否命中
-    //todo 其实不需要valid位(？或者说是需要给后面阶段对比)，pf阶段如果brTaken == 0,默认+4或者+8
-    io.out_0.valid := hit_0 || B_en_0
-    io.out_1.valid := hit_1 || B_en_1
+    // 数据有效取决于是否命中
+    io.out_0.valid := (hit_0 || Ras_en_0)
+    io.out_1.valid := (hit_1 || Ras_en_1)
 
         //-----------------------------更新策略-----------------------------//
     // 第一级：计算更新信息
@@ -264,7 +273,7 @@ class My_Btb extends Module with BP_Utail{
     when(io.update.require) {
         when(io.update.br_type === 0.U) {
             Ras.io.push_en := false.B
-        }.elsewhen(io.update.br_type === 2.U) {
+        }.elsewhen(io.update.br_type === 2.U || io.update.br_type === 3.U ) {
             Ras.io.push_en := true.B
         }.otherwise {
             Ras.io.push_en := false.B
@@ -277,13 +286,11 @@ class My_Btb extends Module with BP_Utail{
 
     // 第三级：实际写入BTB（下一周期）
     when(update_valid_r) {
-        when(br_type_r =/= 0.U) {  // 只有分支指令才写入BTB
             Btb_bank(bank_idx_u_r)(w_way_r).Target := brTarget_r
             Btb_bank(bank_idx_u_r)(w_way_r).tag := tag_u_r
             Btb_bank(bank_idx_u_r)(w_way_r).Type := br_type_r
             Btb_bank(bank_idx_u_r)(w_way_r).dirty := true.B
-        }
-    }
+           }
     // ================= 计数器优化实现 ================= //
     // Stage1寄存输入信号，消除毛刺，按脉冲只记一次
     //todo 计数分支的信号错误，应当根据Pc类型进行计数
@@ -365,8 +372,9 @@ class My_Btb extends Module with BP_Utail{
         dontTouch(phtBank)
         val bhtBank_idx_0 = Wire(UInt(BHTLEN.W))
         val bhtBank_idx_1 = Wire(UInt(BHTLEN.W))
-        val phtBank_idx_0 = Wire(UInt(PHTLEN.W))
         val phtBank_idx_1 = Wire(UInt(PHTLEN.W))
+        val phtBank_idx_0 = Wire(UInt(PHTLEN.W))
+
 
         bhtBank_idx_0 := get_idx(io.pc_in0,32,BHTLEN) & (nBHT-1).U
         bhtBank_idx_1 := get_idx(io.pc_in1,32,BHTLEN) & (nBHT-1).U
@@ -384,7 +392,7 @@ class My_Btb extends Module with BP_Utail{
         io.Taken_1 := phtBank(phtBank_idx_1).ctr(1) && phtBank(phtBank_idx_1).valid
 
         //---------------------------- 更新策略 --------------------------//
-        // 第一级：计算更新信息（当前周期）
+ 
         val bhtBank_idx_u = Wire(UInt(BHTLEN.W))
         val phtBank_idx_u = Wire(UInt(PHTLEN.W))
         val bhr_u = Wire(UInt(BHRLEN.W))
@@ -396,46 +404,38 @@ class My_Btb extends Module with BP_Utail{
         phtBank_idx_u := pc_hash_u ^ bhr_u(PHTLEN-2, 0)
         ctr_u := phtBank(phtBank_idx_u).ctr
 
-        // 第二级：Pipeline寄存器，延迟一拍
-        val update_valid_r = RegNext(io.update.valid, false.B)
-        val bhtBank_idx_u_r = RegNext(bhtBank_idx_u, 0.U)
-        val phtBank_idx_u_r = RegNext(phtBank_idx_u, 0.U)
-        val bhr_u_r = RegNext(bhr_u, 0.U)
-        val ctr_u_r = RegNext(ctr_u, 0.U)
-        val brTaken_r = RegNext(io.update.brTaken, false.B)
-        val bht_valid_r = RegNext(bhtBank(bhtBank_idx_u).valid, false.B)
-        val pht_valid_r = RegNext(phtBank(phtBank_idx_u).valid, false.B)
 
-        // 第三级：实际更新（下一周期）
-        when(update_valid_r) {
-            // 更新BHT
-            when(bht_valid_r) {
-                bhtBank(bhtBank_idx_u_r).bhr := Cat(bhr_u_r(BHRLEN - 2, 0), brTaken_r)
-            }.otherwise {
-                bhtBank(bhtBank_idx_u_r).bhr := Cat(0.U((BHRLEN-1).W), brTaken_r) 
-                bhtBank(bhtBank_idx_u_r).valid := true.B
+         when(io.update.valid) {
+        // BHT更新（使用当前值）
+
+            when(bhtBank(bhtBank_idx_u).valid) {
+                bhtBank(bhtBank_idx_u).bhr := Cat(bhr_u(BHRLEN - 2, 0), io.update.brTaken)
+            }.elsewhen(!bhtBank(bhtBank_idx_u).valid){
+                bhtBank(bhtBank_idx_u).bhr := Cat(0.U((BHRLEN-1).W), io.update.brTaken)
+                bhtBank(bhtBank_idx_u).valid := true.B
             }
-
-            // 更新PHT
-            when(pht_valid_r) {
-                phtBank(phtBank_idx_u_r).ctr := BP_update(ctr_u_r, 2, brTaken_r)
-            }.otherwise {
-                phtBank(phtBank_idx_u_r).ctr := BP_update(0.U, 2, brTaken_r)
-                phtBank(phtBank_idx_u_r).valid := true.B
+            
+            // PHT更新（使用当前值）
+            when(phtBank(phtBank_idx_u).valid) {
+                phtBank(phtBank_idx_u).ctr := BP_update(ctr_u, 2, io.update.brTaken)
+            }.elsewhen(!phtBank(phtBank_idx_u).valid){
+                phtBank(phtBank_idx_u).ctr := BP_update(0.U, 2, io.update.brTaken)
+                phtBank(phtBank_idx_u).valid := true.B
             }
         }
     }
-    // 栈定义
-    class Stack extends Module{
+       // 栈定义
+       class Stack extends Module{
         val STACK_SIZE = 16     // 增加栈大小
         val ADDR_WIDTH = log2Ceil(STACK_SIZE)
         
         val io = IO(new Bundle{
             val pc_0 = Input(UInt(32.W))          
-            val valid_0 = Input(Bool())            
+            val valid_0 = Input(Bool())           
             val pc_1 = Input(UInt(32.W))
             val valid_1 = Input(Bool())
             val push_en = Input(Bool())
+            val ras_data_valid = Input(Bool())
             val pop_en_0 = Input(Bool())
             val pop_en_1 = Input(Bool())
             val in_data = Input(UInt(32.W))
@@ -445,11 +445,13 @@ class My_Btb extends Module with BP_Utail{
             val out_data_1 = Output(UInt(32.W))
         })
         //输入:压栈信号及其数据；出栈信号；pc_0和有效信号
-        //输出:出栈数据及其是否有效  //*有效位是为了在取不出来的情况下给出信号
+        //输出:出栈数据及其是否有效  //*有效位out_en是为了在取不出来的情况下给出信号
         
         val ptr = RegInit(0.U(ADDR_WIDTH.W))
         val stack_bank = RegInit(VecInit(Seq.fill(STACK_SIZE)(0.U(32.W))))
         dontTouch(stack_bank)
+        //*添加有效位，解决不想预测间接跳转但是ret多的情况
+        val stack_valid = RegInit(VecInit(Seq.fill(STACK_SIZE)(false.B)))
         
         //新增：PC去重机制
         val last_pc_0 = RegInit(0.U(32.W))
@@ -491,34 +493,36 @@ class My_Btb extends Module with BP_Utail{
         val full = ptr === STACK_SIZE.U  
         val has_one = ptr === 1.U
         val has_two_or_more = ptr >= 2.U
-        
+
+        //更新在第二个周期
         //使用去重后的信号更新指针
         when(reset.asBool) {
             ptr := 0.U
         }.otherwise {
-            // 先处理push
-            when(real_push_en && ptr < STACK_SIZE.U) {
+            when(real_push_en && ptr < STACK_SIZE.U ) {
                 stack_bank(ptr) := io.in_data
+                stack_valid(ptr) := io.ras_data_valid
                 ptr := ptr + 1.U
             }
-            
-            // 再处理pop（可以同时进行）
-            when(real_pop_en_0 && ptr > 0.U) {
-                stack_bank(ptr) := 0.U
+            when(real_pop_en_0 && real_pop_en_1 && ptr >= 2.U) {
+                // pop两次
+                stack_valid(ptr - 1.U) := false.B
+                stack_valid(ptr - 2.U) := false.B
+                ptr := ptr - 2.U
+            }.elsewhen(real_pop_en_0 && ptr > 0.U) {
+                // pop一次
+                stack_valid(ptr - 1.U) := false.B
                 ptr := ptr - 1.U
-                when(real_pop_en_1  && ptr > 1.U) {
-                    stack_bank(ptr - 1.U) := 0.U
-                    ptr := ptr - 2.U
-                }            
             }.elsewhen(real_pop_en_1 && ptr > 0.U) {
-                stack_bank(ptr) := 0.U
+                // pop一次（只pop_1有效）
+                stack_valid(ptr - 1.U) := false.B
                 ptr := ptr - 1.U
             }
         }
         
         //输出逻辑使用去重后的信号
-        val can_pop_0 = !empty && real_pop_en_0
-        val can_pop_1 = real_pop_en_1 && Mux(real_pop_en_0, has_two_or_more, !empty)
+        val can_pop_0 = !empty && real_pop_en_0 && stack_valid(ptr-1.U)
+        val can_pop_1 = real_pop_en_1 && Mux(real_pop_en_0, has_two_or_more, !empty) && stack_valid(ptr-2.U)
         
         when(can_pop_0 && can_pop_1) {
             io.out_data_0 := stack_bank(ptr - 1.U)
@@ -534,7 +538,7 @@ class My_Btb extends Module with BP_Utail{
             io.out_data_1 := 0.U
         }
         
-        io.out_en_0 := can_pop_0
+        io.out_en_0 := can_pop_0 
         io.out_en_1 := can_pop_1
     
         

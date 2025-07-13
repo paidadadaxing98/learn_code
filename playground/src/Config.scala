@@ -39,7 +39,7 @@ object GenCtrl {
   def FROCE_ICACHE=false
   def FROCE_DCACHE=false
   //NOTE:完成mmu后，跑lab9及以前的测试可能会导致不开cache跑的状态,需要开启强制cache
-  def PERF_CNT=false
+  def PERF_CNT=true
   //NOTE:控制性能计数器 true为开启
   def USE_TLB=true
   //NOTE:控制是否生成带有tlb的代码

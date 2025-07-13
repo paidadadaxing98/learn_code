@@ -91,6 +91,8 @@ class IDU extends Module{
   val allow_taken=Wire(Vec(2,Bool()))
   val isBrJmp=Wire(Vec(2,Bool()))
   val isBrCond=Wire(Vec(2,Bool()))
+  val isBrJirl=Wire(Vec(2,Bool()))
+  val isBrB=Wire(Vec(2,Bool()))
   val j_taken=Wire(Vec(2,Bool()))
   val j_target=Wire(Vec(2,UInt(ADDR_WIDTH.W)))
   allow_taken(0):= InstFIFO.io.fifo_length>=1.U&&id.to_ih.allowin
@@ -99,6 +101,8 @@ class IDU extends Module{
   for(i<-0 until 2){
     isBrJmp(i):=inst_queue_bits(i).inst(31,27)==="b01010".U(5.W)
     isBrCond(i):=Decode(i).inst_op===SDEF(OP_BRU)
+    isBrJirl(i):=inst_queue_bits(i).inst(31,26)==="b010011".U(6.W)
+    isBrB(i):=inst_queue_bits(i).inst(31,26)==="b010100".U(6.W)
     j_taken(i):=isBrJmp(i)&&allow_taken(i)
     j_target(i):=decode_bits(i).pc+Sext(Cat(inst_queue_bits(i).inst(9,0),inst_queue_bits(i).inst(25,10),0.U(2.W)), 32)
   }
@@ -106,9 +110,10 @@ class IDU extends Module{
   val target=Mux(j_taken(0),j_target(0),j_target(1))
 
   /** brType解析
-  * 001 条件分支beq、bne ...
-  * 010 无条件分支b bl jirl
-  * 100 ras ? 待实现
+  * 0001 条件分支beq、bne ...
+  * 0010 BL
+  * 0100 B
+  * 1000 jirl
   */
   /**预测逻辑
     * 当前包含jmp指令时，更新
@@ -125,7 +130,8 @@ class IDU extends Module{
     predictorUpdate(i).pc := decode_bits(i).pc
     predictorUpdate(i).brTaken := j_taken(i)
     predictorUpdate(i).entry.brTarget := j_target(i)
-    predictorUpdate(i).entry.brType   := Mux(isBrJmp(i), 2.U, 0.U)
+    predictorUpdate(i).entry.brType   := Mux(isBrJmp(i), 
+                                          Mux(isBrB(i),4.U,2.U), 0.U)
   }
 
 /*
@@ -169,6 +175,7 @@ not taken   taken                   snpc   add 4 or 8?
   for(i<-0 until 2){
     decode_bits(i).isBrJmp :=isBrJmp(i)
     decode_bits(i).isBrCond:=isBrCond(i)
+    decode_bits(i).isBrJirl   :=isBrJirl(i)
     decode_bits(i).pred:=pred(i)
     decode_bits(i).brjump_result:=predictorUpdate(i)
   }
@@ -203,6 +210,7 @@ class decode_data_bundle extends Bundle{
   val brjump_result=new PredictorUpdate()
   val isBrJmp =Bool()
   val isBrCond=Bool()
+  val isBrJirl =Bool()
   val csr_op  =UInt(Control.CSR_XXXX.length.W)
   val csr_wen =Bool()
   val csr_addr=UInt(14.W)

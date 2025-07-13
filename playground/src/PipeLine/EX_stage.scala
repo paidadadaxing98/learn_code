@@ -110,7 +110,8 @@ class EXU extends Module {
     predictorUpdate(i).pc := ex.to_ls.bits(i).pc
     predictorUpdate(i).brTaken := br_b_taken(i)
     predictorUpdate(i).entry.brTarget := br_target(i)
-    predictorUpdate(i).entry.brType   := Mux(ex.in.bits(i).isBrCond, 1.U, 0.U)
+    predictorUpdate(i).entry.brType   := Mux(ex.in.bits(i).isBrCond, 
+                                          Mux(ex.in.bits(i).isBrJirl,8.U,1.U), 0.U)
   }
 
   /*

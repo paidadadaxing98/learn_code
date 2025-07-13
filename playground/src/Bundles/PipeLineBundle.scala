@@ -117,6 +117,7 @@ class ih_to_ex_bus_data_bundle extends Bundle{
   val perf_branch=new perf_branch_bundle()
   val isBrJmp =Bool()
   val isBrCond=Bool()
+  val isBrJirl=Bool()
   val brjump_result = new PredictorUpdate()
   val relate_src1=Bool()
   val relate_src2=Bool()

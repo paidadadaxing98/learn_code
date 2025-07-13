@@ -53,7 +53,7 @@ object GenCtrl {
 
 object BtbParams {
   def FetchWidth = 2
-  def BrTypeWidth = 2
+  def BrTypeWidth = 4
   def BTB_Entrys = 256
   def BTB_Ways  = 2
   def BTB_Sets = BTB_Entrys/BTB_Ways //128
